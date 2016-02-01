@@ -23,6 +23,8 @@ import org.apache.spark.TaskState.TaskState
 import org.apache.spark.rpc.RpcEndpointRef
 import org.apache.spark.scheduler.ExecutorLossReason
 import org.apache.spark.util.{SerializableBuffer, Utils}
+import org.apache.spark.scheduler.TaskSet
+import org.apache.spark.scheduler.TaskDescription
 
 private[spark] sealed trait CoarseGrainedClusterMessage extends Serializable
 
@@ -37,8 +39,9 @@ private[spark] object CoarseGrainedClusterMessages {
   case class LaunchTask(reply:RpcEndpointRef, data: SerializableBuffer) extends CoarseGrainedClusterMessage
   // case class AddExecutor(scheduler: RpcEndpointRef) extends CoarseGrainedClusterMessage
   case class UpdateExecData(eid:String, data:ExecutorData) extends CoarseGrainedClusterMessage
-
+  case class ProxyLaunchTasks(taskset: TaskSet,indexes: Array[Long]) extends CoarseGrainedClusterMessage
 //
+
   case class KillTask(taskId: Long, executor: String, interruptThread: Boolean)
     extends CoarseGrainedClusterMessage
 

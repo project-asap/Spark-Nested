@@ -28,6 +28,7 @@ import org.apache.spark.scheduler._
 import org.apache.spark.scheduler.cluster.CoarseGrainedClusterMessages._
 import org.apache.spark.scheduler.cluster.CoarseGrainedSchedulerBackend.ENDPOINT_NAME
 import org.apache.spark.util.{ThreadUtils, SerializableBuffer, AkkaUtils, Utils}
+import scala.util.Random
 
 /**
  * A scheduler backend that waits for coarse grained executors to connect to it through Akka.
@@ -77,6 +78,16 @@ class CoarseGrainedSchedulerBackend(scheduler: TaskSchedulerImpl, val rpcEnv: Rp
 
   // Executors that have been lost, but for which we don't yet know the real exit reason.
   protected val executorsPendingLossReason = new HashSet[String]
+
+  val NSCHEDULERS = scheduler.sc.conf.getOption("spark.dscheduling") match {
+    case Some(string) => string.toInt
+    case None => 0
+  }
+
+  private val r = new Random()
+  val dschedulingEnabled = if(NSCHEDULERS >0) true else false
+
+  var dSchedulers: Array[RpcEndpointRef] = null
 
   class DriverEndpoint(override val rpcEnv: RpcEnv, sparkProperties: Seq[(String, String)])
     extends ThreadSafeRpcEndpoint with Logging {
@@ -161,7 +172,14 @@ class CoarseGrainedSchedulerBackend(scheduler: TaskSchedulerImpl, val rpcEnv: Rp
             }
           }
           // Note: some tests expect the reply to come after we put the executor in the map
-          context.reply(RegisteredExecutor(executorAddress.host))
+
+          val assignedScheduler = if(dschedulingEnabled) {
+            val sid = r.nextInt(NSCHEDULERS) //assign the worker to a random scheduler
+            dSchedulers(sid)
+          } else {
+            null
+          }
+          context.reply(RegisteredExecutor(executorAddress.host,assignedScheduler))
           listenerBus.post(
             SparkListenerExecutorAdded(System.currentTimeMillis(), executorId, data))
           makeOffers()
@@ -241,7 +259,7 @@ class CoarseGrainedSchedulerBackend(scheduler: TaskSchedulerImpl, val rpcEnv: Rp
         else {
           val executorData = executorDataMap(task.executorId)
           executorData.freeCores -= scheduler.CPUS_PER_TASK
-          executorData.executorEndpoint.send(LaunchTask(new SerializableBuffer(serializedTask)))
+          executorData.executorEndpoint.send(LaunchTask(this.self,new SerializableBuffer(serializedTask)))
         }
       }
     }
@@ -311,6 +329,12 @@ class CoarseGrainedSchedulerBackend(scheduler: TaskSchedulerImpl, val rpcEnv: Rp
 
     // TODO (prashant) send conf instead of properties
     driverEndpoint = rpcEnv.setupEndpoint(ENDPOINT_NAME, createDriverEndpoint(properties))
+
+    dSchedulers = Array.tabulate(NSCHEDULERS)( i =>
+      rpcEnv.setupEndpoint(s"SecondaryScheduler$i",
+        new SecondLevelScheduler(
+          i,rpcEnv,driverEndpoint,executorDataMap,scheduler.sc.addedFiles,scheduler.sc.addedJars))
+    )
   }
 
   protected def createDriverEndpoint(properties: Seq[(String, String)]): DriverEndpoint = {

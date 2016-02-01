@@ -100,8 +100,8 @@ private[spark] class CoarseGrainedExecutorBackend(
         logError("Received LaunchTask command but executor was null")
         System.exit(1)
       } else {
-        taskIdtoScheduler(taskDesc.taskId) = reply //register each id with the scheduler
         val taskDesc = ser.deserialize[TaskDescription](data.value)
+        taskIdtoScheduler(taskDesc.taskId) = reply //register each id with the scheduler
 
         if( availableCores  > 0 ){ //avoid running tasks concurrently
           availableCores = availableCores - 1

@@ -370,8 +370,9 @@ class SparkConf(loadDefaults: Boolean) extends Cloneable with Logging {
   }
 
   //distributed scheduling extra argument
+  // set("spark.dscheduling","false")
   def enableDistSchedulng(nschedulers:Int) = {
-    set("spark.dscheduling","true")
+    set("spark.dscheduling",s"$nschedulers")
   }
 
   /**

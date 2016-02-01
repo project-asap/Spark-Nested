@@ -121,15 +121,15 @@ class SecondLevelScheduler(val id:Int,
         logInfo(s"**2LScheduler fwd msg $msg to $masterDriver")
         masterDriver.send(msg)
 
-      case msg@BatchRddOperators(executorId, rddid, ops, jobId, taskf) =>
-        assert(false,"Nesting not yet supported")
-        logInfo(s"**2LScheduler fwd msg $msg to $masterDriver")
-        logInfo("--DEBUG caught BatchOperators Message")
-        masterDriver.send(msg)
+      // case msg@BatchRddOperators(executorId, rddid, ops, jobId, taskf) =>
+      //   assert(false,"Nesting not yet supported")
+      //   logInfo(s"**2LScheduler fwd msg $msg to $masterDriver")
+      //   logInfo("--DEBUG caught BatchOperators Message")
+      //   masterDriver.send(msg)
 
-      case msg@NestingFinished(execId) =>
-        logInfo(s"**2LScheduler fwd msg $msg to $masterDriver")
-        masterDriver.send(msg)
+      // case msg@NestingFinished(execId) =>
+      //   logInfo(s"**2LScheduler fwd msg $msg to $masterDriver")
+      //   masterDriver.send(msg)
 
       case ProxyLaunchTasks(taskset,indexes) =>
         logInfo(s"<<<EXP SLS received the TaskSet $indexes !!!")
