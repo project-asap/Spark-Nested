@@ -34,6 +34,8 @@ import org.apache.spark.scheduler.TaskDescription
 import org.apache.spark.scheduler.cluster.CoarseGrainedClusterMessages._
 import org.apache.spark.serializer.SerializerInstance
 import org.apache.spark.util.{ThreadUtils, SignalLogger, Utils}
+import scala.collection.mutable.{HashMap}
+
 
 private[spark] class CoarseGrainedExecutorBackend(
     override val rpcEnv: RpcEnv,
@@ -51,6 +53,12 @@ private[spark] class CoarseGrainedExecutorBackend(
   // If this CoarseGrainedExecutorBackend is changed to support multiple threads, then this may need
   // to be changed so that we don't share the serializer instance across threads
   private[this] val ser: SerializerInstance = env.closureSerializer.newInstance()
+
+  var driver2Level : Option[RpcEndpointRef] = None
+  val taskIdtoScheduler = new HashMap[Long,RpcEndpointRef]
+  @volatile var availableCores : Int = cores
+
+  val taskQueue = scala.collection.mutable.ListBuffer.empty[TaskDescription]
 
   override def onStart() {
     logInfo("Connecting to driver: " + driverUrl)
@@ -78,23 +86,32 @@ private[spark] class CoarseGrainedExecutorBackend(
   }
 
   override def receive: PartialFunction[Any, Unit] = {
-    case RegisteredExecutor(hostname) =>
+    case RegisteredExecutor(hostname,dscheduler) =>
       logInfo("Successfully registered with driver")
       executor = new Executor(executorId, hostname, env, userClassPath, isLocal = false)
+      driver2Level = Some(dscheduler)
 
     case RegisterExecutorFailed(message) =>
       logError("Slave registration failed: " + message)
       System.exit(1)
 
-    case LaunchTask(data) =>
+    case LaunchTask(reply,data) =>
       if (executor == null) {
         logError("Received LaunchTask command but executor was null")
         System.exit(1)
       } else {
+        taskIdtoScheduler(taskDesc.taskId) = reply //register each id with the scheduler
         val taskDesc = ser.deserialize[TaskDescription](data.value)
-        logInfo("Got assigned task " + taskDesc.taskId)
-        executor.launchTask(this, taskId = taskDesc.taskId, attemptNumber = taskDesc.attemptNumber,
-          taskDesc.name, taskDesc.serializedTask)
+
+        if( availableCores  > 0 ){ //avoid running tasks concurrently
+          availableCores = availableCores - 1
+          logInfo("Got assigned task " + taskDesc.taskId)
+          executor.launchTask(this, taskId = taskDesc.taskId, attemptNumber = taskDesc.attemptNumber,
+            taskDesc.name, taskDesc.serializedTask)
+          availableCores = availableCores + 1
+        } else {
+          taskQueue += taskDesc //enqueue for later use
+        }
       }
 
     case KillTask(taskId, _, interruptThread) =>

@@ -31,14 +31,20 @@ private[spark] object CoarseGrainedClusterMessages {
   case object RetrieveSparkProps extends CoarseGrainedClusterMessage
 
   // Driver to executors
-  case class LaunchTask(data: SerializableBuffer) extends CoarseGrainedClusterMessage
+  // case class LaunchTask(data: SerializableBuffer) extends CoarseGrainedClusterMessage
 
+//distributed schedulin extra messages
+  case class LaunchTask(reply:RpcEndpointRef, data: SerializableBuffer) extends CoarseGrainedClusterMessage
+  // case class AddExecutor(scheduler: RpcEndpointRef) extends CoarseGrainedClusterMessage
+  case class UpdateExecData(eid:String, data:ExecutorData) extends CoarseGrainedClusterMessage
+
+//
   case class KillTask(taskId: Long, executor: String, interruptThread: Boolean)
     extends CoarseGrainedClusterMessage
 
   sealed trait RegisterExecutorResponse
 
-  case class RegisteredExecutor(hostname: String) extends CoarseGrainedClusterMessage
+  case class RegisteredExecutor(hostname: String,scheduler: RpcEndpointRef) extends CoarseGrainedClusterMessage
     with RegisterExecutorResponse
 
   case class RegisterExecutorFailed(message: String) extends CoarseGrainedClusterMessage
