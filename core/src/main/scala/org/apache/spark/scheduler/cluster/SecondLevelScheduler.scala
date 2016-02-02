@@ -101,6 +101,30 @@ class SecondLevelScheduler(val id:Int,
 
   }
 
+  def launchTasks(taskArray: Array[FutureTask]) : Unit = {
+    assert(NEXECUTORS>0) 
+
+    logInfo(s"<<<EXP executors $execList")
+
+    val taskd = taskArray.map(_.toTaskDescription())
+
+    taskd.foreach( task => {
+      val eid = r.nextInt(NEXECUTORS)
+
+      executorDataMap.get(execList(eid)) match {
+        case Some(data) =>
+          logInfo(s"<<< EXP SENDING TASK to exec ${data.executorEndpoint}")
+          val sertdesc = closureSerializer.serialize[TaskDescription](task)
+          data.executorEndpoint.send(LaunchTask(this.self,new SerializableBuffer(sertdesc) ))
+        case None =>
+          logInfo(s"<<<NO WAY EID($eid) is not in the executors List!!!")
+          assert(false)
+      }
+      })
+
+  }
+
+
 
     override def receive: PartialFunction[Any,Unit] = {
       case msg@StatusUpdate(executorId, taskId, state, data) =>
@@ -140,9 +164,12 @@ class SecondLevelScheduler(val id:Int,
           new FutureTask(indexes(i),taskset.tasks(i))
         )
 
-        taskQueue ++= taskds
-        launchTasks()
-
+        if(NEXECUTORS==0){
+          //keep the tasks for later
+          taskQueue ++= taskds
+        } else {
+          launchTasks(taskds)
+        }
       case UpdateExecData(eid,data) =>
         logInfo(s"<<< EXP Update executor $eid")
         executorDataMap(eid) = data

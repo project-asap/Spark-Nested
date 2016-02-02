@@ -103,15 +103,15 @@ private[spark] class CoarseGrainedExecutorBackend(
         val taskDesc = ser.deserialize[TaskDescription](data.value)
         taskIdtoScheduler(taskDesc.taskId) = reply //register each id with the scheduler
 
-        if( availableCores  > 0 ){ //avoid running tasks concurrently
+        // if( availableCores  > 0 ){ //avoid running tasks concurrently
           availableCores = availableCores - 1
           logInfo("Got assigned task " + taskDesc.taskId)
           executor.launchTask(this, taskId = taskDesc.taskId, attemptNumber = taskDesc.attemptNumber,
             taskDesc.name, taskDesc.serializedTask)
           availableCores = availableCores + 1
-        } else {
-          taskQueue += taskDesc //enqueue for later use
-        }
+        // } else {
+          // taskQueue += taskDesc //enqueue for later use
+        // }
       }
 
     case KillTask(taskId, _, interruptThread) =>
@@ -145,7 +145,7 @@ private[spark] class CoarseGrainedExecutorBackend(
 
   override def statusUpdate(taskId: Long, state: TaskState, data: ByteBuffer) {
     val msg = StatusUpdate(executorId, taskId, state, data)
-    driver match {
+    driver2Level match {
       case Some(driverRef) => driverRef.send(msg)
       case None => logWarning(s"Drop $msg because has not yet connected to driver")
     }

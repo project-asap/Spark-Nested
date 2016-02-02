@@ -51,6 +51,9 @@ private[spark] trait TaskScheduler {
   // Submit a sequence of tasks to run.
   def submitTasks(taskSet: TaskSet): Unit
 
+  //katsogr compile
+  def submitTasksDist(taskSet: TaskSet): Unit
+
   // Cancel a stage.
   def cancelTasks(stageId: Int, interruptThread: Boolean)
 

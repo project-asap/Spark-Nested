@@ -1049,9 +1049,19 @@ class DAGScheduler(
       logInfo("Submitting " + tasks.size + " missing tasks from " + stage + " (" + stage.rdd + ")")
       stage.pendingPartitions ++= tasks.map(_.partitionId)
       logDebug("New pending partitions: " + stage.pendingPartitions)
-      taskScheduler.submitTasks(new TaskSet(
-        tasks.toArray, stage.id, stage.latestInfo.attemptId, jobId, properties))
+      
+      val taskset = new TaskSet(
+        tasks.toArray, stage.id, stage.latestInfo.attemptId, jobId, properties)
+      
+      if(sc.conf.getDistScheduling() == false)
+        taskScheduler.submitTasks(taskset)
+      else {
+        //distributed Scheduling mode
+        logInfo(s"<<< DS scheduling takset $taskset")
+        taskScheduler.submitTasksDist(taskset)
+      }
       stage.latestInfo.submissionTime = Some(clock.getTimeMillis())
+
     } else {
       // Because we posted SparkListenerStageSubmitted earlier, we should mark
       // the stage as completed here in case there are no tasks to run

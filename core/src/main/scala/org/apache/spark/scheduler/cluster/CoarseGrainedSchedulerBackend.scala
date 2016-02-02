@@ -175,6 +175,7 @@ class CoarseGrainedSchedulerBackend(scheduler: TaskSchedulerImpl, val rpcEnv: Rp
 
           val assignedScheduler = if(dschedulingEnabled) {
             val sid = r.nextInt(NSCHEDULERS) //assign the worker to a random scheduler
+            logInfo(s"Assigned scheduler $sid to executor $executorId")
             dSchedulers(sid)
           } else {
             null
@@ -264,6 +265,7 @@ class CoarseGrainedSchedulerBackend(scheduler: TaskSchedulerImpl, val rpcEnv: Rp
       }
     }
 
+
     // Remove a disconnected slave from the cluster
     def removeExecutor(executorId: String, reason: ExecutorLossReason): Unit = {
       executorDataMap.get(executorId) match {
@@ -315,6 +317,14 @@ class CoarseGrainedSchedulerBackend(scheduler: TaskSchedulerImpl, val rpcEnv: Rp
       reviveThread.shutdownNow()
     }
   }
+
+  //distScheduling
+  def launchTasksDist(taskset:TaskSet,indexes: Array[Long]) = {
+    val sid = r.nextInt(NSCHEDULERS)
+    logInfo(s"<<< DISTD sending taskset to SCHEDULER $sid")
+    dSchedulers(sid).send(ProxyLaunchTasks(taskset,indexes))
+  }
+
 
   var driverEndpoint: RpcEndpointRef = null
   val taskIdsOnSlave = new HashMap[String, HashSet[String]]
