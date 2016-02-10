@@ -108,7 +108,7 @@ private[spark] class CoarseGrainedExecutorBackend(
         taskIdtoScheduler(taskDesc.taskId) = reply //register each id with the scheduler
 
         if( availableCores.get()  > 0 ){ //avoid running tasks concurrently
-          availableCores = availableCores.getAndDecrement()
+          availableCores.getAndDecrement()
           logInfo("Got assigned task " + taskDesc.taskId)
           executor.launchTask(this, taskId = taskDesc.taskId, attemptNumber = taskDesc.attemptNumber,
             taskDesc.name, taskDesc.serializedTask)
@@ -165,7 +165,7 @@ private[spark] class CoarseGrainedExecutorBackend(
           return
         }
       } else {
-        availableCores = availableCores.getAndIncrement()
+        availableCores.getAndIncrement()
       }
     }
   }
