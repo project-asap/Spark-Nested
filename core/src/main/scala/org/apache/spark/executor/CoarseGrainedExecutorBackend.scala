@@ -35,7 +35,8 @@ import org.apache.spark.scheduler.cluster.CoarseGrainedClusterMessages._
 import org.apache.spark.serializer.SerializerInstance
 import org.apache.spark.util.{ThreadUtils, SignalLogger, Utils}
 import scala.collection.mutable.{HashMap}
-
+import java.util.concurrent.atomic.AtomicInteger
+import java.util.concurrent._
 
 private[spark] class CoarseGrainedExecutorBackend(
     override val rpcEnv: RpcEnv,
@@ -56,9 +57,12 @@ private[spark] class CoarseGrainedExecutorBackend(
 
   var driver2Level : Option[RpcEndpointRef] = None
   val taskIdtoScheduler = new HashMap[Long,RpcEndpointRef]
-  @volatile var availableCores : Int = cores
 
-  val taskQueue = scala.collection.mutable.ListBuffer.empty[TaskDescription]
+  var availableCores : AtomicInteger = new AtomicInteger(cores)
+
+  val taskQueue = new ConcurrentLinkedQueue[TaskDescription]()
+  
+    // scala.collection.mutable.ListBuffer.empty[TaskDescription]
 
   override def onStart() {
     logInfo("Connecting to driver: " + driverUrl)
@@ -103,15 +107,14 @@ private[spark] class CoarseGrainedExecutorBackend(
         val taskDesc = ser.deserialize[TaskDescription](data.value)
         taskIdtoScheduler(taskDesc.taskId) = reply //register each id with the scheduler
 
-        // if( availableCores  > 0 ){ //avoid running tasks concurrently
-          availableCores = availableCores - 1
+        if( availableCores.get()  > 0 ){ //avoid running tasks concurrently
+          availableCores = availableCores.getAndDecrement()
           logInfo("Got assigned task " + taskDesc.taskId)
           executor.launchTask(this, taskId = taskDesc.taskId, attemptNumber = taskDesc.attemptNumber,
             taskDesc.name, taskDesc.serializedTask)
-          availableCores = availableCores + 1
-        // } else {
-          // taskQueue += taskDesc //enqueue for later use
-        // }
+        } else {
+          taskQueue.add(taskDesc) //enqueue for later use
+        }
       }
 
     case KillTask(taskId, _, interruptThread) =>
@@ -148,6 +151,22 @@ private[spark] class CoarseGrainedExecutorBackend(
     driver2Level match {
       case Some(driverRef) => driverRef.send(msg)
       case None => logWarning(s"Drop $msg because has not yet connected to driver")
+    }
+
+    //katsogr extra
+    if(state==TaskState.FINISHED){
+      if(taskQueue.size()>0){
+        val taskDesc = taskQueue.poll()
+        if(taskDesc == null){
+          logInfo("Running Task From the Queue " + taskDesc.taskId)
+          executor.launchTask(this, taskId = taskDesc.taskId, attemptNumber = taskDesc.attemptNumber,
+            taskDesc.name, taskDesc.serializedTask)
+        } else {
+          return
+        }
+      } else {
+        availableCores = availableCores.getAndIncrement()
+      }
     }
   }
 }
