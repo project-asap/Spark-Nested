@@ -122,7 +122,9 @@ class CoarseGrainedSchedulerBackend(scheduler: TaskSchedulerImpl, val rpcEnv: Rp
           executorDataMap.get(executorId) match {
             case Some(executorInfo) =>
               executorInfo.freeCores += scheduler.CPUS_PER_TASK
-              makeOffers(executorId)
+              if(dschedulingEnabled==false){
+                makeOffers(executorId)
+              }
             case None =>
               // Ignoring the update since we don't know about the executor.
               logWarning(s"Ignored task status update ($taskId state $state) " +
@@ -131,7 +133,7 @@ class CoarseGrainedSchedulerBackend(scheduler: TaskSchedulerImpl, val rpcEnv: Rp
         }
 
       case ReviveOffers =>
-        makeOffers()
+        if(dschedulingEnabled==false) makeOffers()
 
       case KillTask(taskId, executorId, interruptThread) =>
         executorDataMap.get(executorId) match {
@@ -172,6 +174,7 @@ class CoarseGrainedSchedulerBackend(scheduler: TaskSchedulerImpl, val rpcEnv: Rp
             }
           }
           // Note: some tests expect the reply to come after we put the executor in the map
+          dSchedulers.foreach( scheduler => scheduler.send( UpdateExecData(executorId,data)))
 
           val assignedScheduler = if(dschedulingEnabled) {
             val sid = r.nextInt(NSCHEDULERS) //assign the worker to a random scheduler
@@ -183,7 +186,7 @@ class CoarseGrainedSchedulerBackend(scheduler: TaskSchedulerImpl, val rpcEnv: Rp
           context.reply(RegisteredExecutor(executorAddress.host,assignedScheduler))
           listenerBus.post(
             SparkListenerExecutorAdded(System.currentTimeMillis(), executorId, data))
-          makeOffers()
+          // makeOffers()
         }
 
       case StopDriver =>
@@ -320,9 +323,15 @@ class CoarseGrainedSchedulerBackend(scheduler: TaskSchedulerImpl, val rpcEnv: Rp
 
   //distScheduling
   def launchTasksDist(taskset:TaskSet,indexes: Array[Long]) = {
-    val sid = r.nextInt(NSCHEDULERS)
-    logInfo(s"<<< DISTD sending taskset to SCHEDULER $sid")
-    dSchedulers(sid).send(ProxyLaunchTasks(taskset,indexes))
+    //slice the taskset into many sub tasksets to increase parallelism
+    indexes.grouped(NSCHEDULERS).toArray.zip(taskset.slice(NSCHEDULERS)).foreach(
+      pair => {
+        val subtasks = pair._2
+        val subindices = pair._1
+      val sid = r.nextInt(NSCHEDULERS)
+      logInfo(s"<<< DISTD sending taskset to SCHEDULER $sid")
+      dSchedulers(sid).send(ProxyLaunchTasks(subtasks,subindices))
+    })
   }
 
 

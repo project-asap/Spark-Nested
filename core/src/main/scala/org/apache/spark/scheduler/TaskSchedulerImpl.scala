@@ -209,7 +209,7 @@ private[spark] class TaskSchedulerImpl(
     val clock = new SystemClock()
     val n = tasks.length
     val indexes = Array.tabulate(n)(i=>newTaskId())
-    logInfo(s"<<< DS generated NEW taskIds ${indexes.mkString(",")}")
+    // logInfo(s"<<< DS generated NEW taskIds ${indexes.mkString(",")}")
     val infos = Array.tabulate(n)( i=>
       new TaskInfo(indexes(i),i,attemptNumber=1,clock.getTimeMillis(),null,null,TaskLocality.ANY,false)
     )
@@ -232,7 +232,7 @@ private[spark] class TaskSchedulerImpl(
       schedulableBuilder.addTaskSetManager(manager, manager.taskSet.properties)
 
       //distScheduling
-      // indexes.foreach( ind => taskIdToTaskSetId(ind)=taskSet.id)
+      indexes.foreach( ind => taskIdToTaskSetManager(ind)=manager)
       infos.map(in=>(in.taskId,in)).foreach{
         case(i,info) =>
           logInfo(s"<<< EXP adding KEY($i) info to TASKSETID(${taskSet.id})")

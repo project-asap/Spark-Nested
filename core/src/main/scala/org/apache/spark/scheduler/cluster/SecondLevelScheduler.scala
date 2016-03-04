@@ -81,50 +81,91 @@ class SecondLevelScheduler(val id:Int,
     val proxytask = if(taskQueue.isEmpty ==false) {
       taskQueue.dequeue()
     } else {
+      logInfo("<<<DISTS Queue is empty!!!")
       return
     }
     logInfo(s"<<<EXP executors $execList")
 
-    val taskd = proxytask.toTaskDescription()
+    launchTask(proxytask)
 
-    val eid = r.nextInt(NEXECUTORS)
+    // val taskd = proxytask.toTaskDescription()
 
-    executorDataMap.get(execList(eid)) match {
-      case Some(data) =>
-        logInfo(s"<<< EXP SENDING TASK to exec ${data.executorEndpoint}")
-        val sertdesc = closureSerializer.serialize[TaskDescription](taskd)
-        data.executorEndpoint.send(LaunchTask(this.self,new SerializableBuffer(sertdesc) ))
-      case None =>
-        logInfo(s"<<<NO WAY EID($eid) is not in the executors List!!!")
-        assert(false)
-    }
+    // val eid = r.nextInt(NEXECUTORS)
+
+    // executorDataMap.get(execList(eid)) match {
+    //   case Some(data) =>
+    //     logInfo(s"<<< EXP SENDING TASK to exec ${data.executorEndpoint}")
+    //     val sertdesc = closureSerializer.serialize[TaskDescription](taskd)
+    //     data.executorEndpoint.send(LaunchTask(this.self,new SerializableBuffer(sertdesc) ))
+    //   case None =>
+    //     logInfo(s"<<<NO WAY EID($eid) is not in the executors List!!!")
+    //     assert(false)
+    // }
 
   }
 
-  def launchTasks(taskArray: Array[FutureTask]) : Unit = {
-    assert(NEXECUTORS>0) 
+  def launchTasks(taskArray: Array[FutureTask]): Unit = {
+    assert(NEXECUTORS>0)
 
     logInfo(s"<<<EXP executors $execList")
 
-    val taskd = taskArray.map(_.toTaskDescription())
+    taskArray.foreach( ftask => {
+      launchTask(ftask)
+      // val eid = ftask.task.preferredLocations match{
+      //   case Nil    =>
+      //     logInfo(s"<<<Dist Scheculing task $ftask.taskId NO LOCATIONS FOUND")
+      //     execList(r.nextInt(NEXECUTORS) ) //pick a random executor
+      //   case locSeq =>
+      //     logInfo(s"<<<Dist Scheculing task $ftask.taskId locs:"+locSeq.mkString(","))
+      //     locSeq(0) match {
+      //       case ExecutorCacheTaskLocation(host,execid) =>
+      //         execid
+      //       case _                                      =>
+      //         execList(r.nextInt(NEXECUTORS) ) //pick a random executor
+      //     }
+      // }
 
-    taskd.foreach( task => {
-      val eid = r.nextInt(NEXECUTORS)
+      // executorDataMap.get(eid) match {
+      //   case Some(data) =>
+      //     logInfo(s"<<< EXP SENDING TASK to exec ${data.executorEndpoint}")
+      //     val taskd = ftask.toTaskDescription()
+      //     val sertdesc = closureSerializer.serialize[TaskDescription](taskd)
+      //     data.executorEndpoint.send(LaunchTask(this.self,new SerializableBuffer(sertdesc) ))
+      //   case None =>
+      //     logInfo(s"<<<NO WAY EID($eid) is not in the executors List!!!")
+      //     assert(false)
+      // }
+      })
 
-      executorDataMap.get(execList(eid)) match {
+  }
+
+  def launchTask(ftask: FutureTask): Unit = {
+      val eid = ftask.task.preferredLocations match{
+        case Nil    =>
+          logInfo(s"<<<Dist Scheculing task $ftask.taskId NO LOCATIONS FOUND")
+          execList(r.nextInt(NEXECUTORS) ) //pick a random executor
+        case locSeq =>
+          logInfo(s"<<<Dist Scheculing task $ftask.taskId locs:"+locSeq.mkString(","))
+          locSeq(0) match {
+            case ExecutorCacheTaskLocation(host,execid) =>
+              execid
+            case _                                      =>
+              execList(r.nextInt(NEXECUTORS) ) //pick a random executor
+          }
+      }
+
+      executorDataMap.get(eid) match {
         case Some(data) =>
           logInfo(s"<<< EXP SENDING TASK to exec ${data.executorEndpoint}")
-          val sertdesc = closureSerializer.serialize[TaskDescription](task)
+          val taskd = ftask.toTaskDescription()
+          val sertdesc = closureSerializer.serialize[TaskDescription](taskd)
           data.executorEndpoint.send(LaunchTask(this.self,new SerializableBuffer(sertdesc) ))
         case None =>
           logInfo(s"<<<NO WAY EID($eid) is not in the executors List!!!")
           assert(false)
       }
-      })
 
   }
-
-
 
     override def receive: PartialFunction[Any,Unit] = {
       case msg@StatusUpdate(executorId, taskId, state, data) =>
@@ -166,8 +207,10 @@ class SecondLevelScheduler(val id:Int,
 
         if(NEXECUTORS==0){
           //keep the tasks for later
+          logInfo("<<< DISTS Enqueueing taskset for later use")
           taskQueue ++= taskds
         } else {
+          logInfo("<<< DISTS immediately launching tasks")
           launchTasks(taskds)
         }
       case UpdateExecData(eid,data) =>
