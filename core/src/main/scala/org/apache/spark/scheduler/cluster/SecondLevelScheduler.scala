@@ -84,7 +84,7 @@ class SecondLevelScheduler(val id:Int,
       logInfo("<<<DISTS Queue is empty!!!")
       return
     }
-    logInfo(s"<<<EXP executors $execList")
+    // logInfo(s"<<<EXP executors $execList")
 
     launchTask(proxytask)
 
@@ -107,7 +107,7 @@ class SecondLevelScheduler(val id:Int,
   def launchTasks(taskArray: Array[FutureTask]): Unit = {
     assert(NEXECUTORS>0)
 
-    logInfo(s"<<<EXP executors $execList")
+    // logInfo(s"<<<EXP executors $execList")
 
     taskArray.foreach( ftask => {
       launchTask(ftask)
@@ -142,11 +142,12 @@ class SecondLevelScheduler(val id:Int,
   def launchTask(ftask: FutureTask): Unit = {
       val eid = ftask.task.preferredLocations match{
         case Nil    =>
-          logInfo(s"<<<Dist Scheculing task $ftask.taskId NO LOCATIONS FOUND")
+          // logInfo(s"<<<Dist Scheculing task $ftask.taskId NO LOCATIONS FOUND")
           execList(r.nextInt(NEXECUTORS) ) //pick a random executor
         case locSeq =>
-          logInfo(s"<<<Dist Scheculing task $ftask.taskId locs:"+locSeq.mkString(","))
-          locSeq(0) match {
+          // logInfo(s"<<<Dist Scheculing task $ftask.taskId locs:"+locSeq.mkString(","))
+          val l = r.nextInt(locSeq.length)
+          locSeq(l) match {
             case ExecutorCacheTaskLocation(host,execid) =>
               execid
             case _                                      =>
@@ -197,7 +198,7 @@ class SecondLevelScheduler(val id:Int,
       //   masterDriver.send(msg)
 
       case ProxyLaunchTasks(taskset,indexes) =>
-        logInfo(s"<<<EXP SLS received the TaskSet $indexes !!!")
+        // logInfo(s"<<<EXP SLS received the TaskSet $indexes !!!")
         assert(taskset.tasks.length == indexes.length)
 
         //divide the taskset into Task metadata using FutureTask helper class
@@ -210,7 +211,7 @@ class SecondLevelScheduler(val id:Int,
           logInfo("<<< DISTS Enqueueing taskset for later use")
           taskQueue ++= taskds
         } else {
-          logInfo("<<< DISTS immediately launching tasks")
+          // logInfo("<<< DISTS immediately launching tasks")
           launchTasks(taskds)
         }
       case UpdateExecData(eid,data) =>

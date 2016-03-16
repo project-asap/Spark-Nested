@@ -91,10 +91,14 @@ private[spark] class CoarseGrainedExecutorBackend(
 
   override def receive: PartialFunction[Any, Unit] = {
     case RegisteredExecutor(hostname,dscheduler) =>
-      logInfo("Successfully registered with driver")
+      logInfo(s"Successfully registered with driver $dscheduler")
       executor = new Executor(executorId, hostname, env, userClassPath, isLocal = false)
-      driver2Level = Some(dscheduler)
-
+      driver2Level = driver
+      // if(dscheduler != null ){
+        // Some(dscheduler)
+      // } else {
+        // driver
+      // }
     case RegisterExecutorFailed(message) =>
       logError("Slave registration failed: " + message)
       System.exit(1)
@@ -105,11 +109,11 @@ private[spark] class CoarseGrainedExecutorBackend(
         System.exit(1)
       } else {
         val taskDesc = ser.deserialize[TaskDescription](data.value)
-        taskIdtoScheduler(taskDesc.taskId) = reply //register each id with the scheduler
-
-        if( availableCores.get()  > 0 ){ //avoid running tasks concurrently
+        // taskIdtoScheduler(taskDesc.taskId) = reply //maybe remove that
+        // logInfo(s"<<< LaunchTasks msg DISTD Cores == $availableCores")
+        if( availableCores.get() > 0 ){ //avoid running tasks concurrently
           availableCores.getAndDecrement()
-          logInfo("Got assigned task " + taskDesc.taskId)
+          logInfo("Got assigned task " + taskDesc.taskId )
           executor.launchTask(this, taskId = taskDesc.taskId, attemptNumber = taskDesc.attemptNumber,
             taskDesc.name, taskDesc.serializedTask)
         } else {
@@ -157,12 +161,12 @@ private[spark] class CoarseGrainedExecutorBackend(
     if(state==TaskState.FINISHED){
       if(taskQueue.size()>0){
         val taskDesc = taskQueue.poll()
-        if(taskDesc == null){
+        if(taskDesc != null){
           logInfo("Running Task From the Queue " + taskDesc.taskId)
           executor.launchTask(this, taskId = taskDesc.taskId, attemptNumber = taskDesc.attemptNumber,
             taskDesc.name, taskDesc.serializedTask)
         } else {
-          return
+          availableCores.getAndIncrement()
         }
       } else {
         availableCores.getAndIncrement()
