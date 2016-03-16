@@ -5,9 +5,9 @@
  *  The ASF licenses this file to You under the Apache License, Version 2.0
  *  (the "License"); you may not use this file except in compliance with
  *  the License.  You may obtain a copy of the License at
- * 
+ *
  *     http://www.apache.org/licenses/LICENSE-2.0
- * 
+ *
  *  Unless required by applicable law or agreed to in writing, software
  *  distributed under the License is distributed on an "AS IS" BASIS,
  *  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -71,6 +71,19 @@ class SecondLevelScheduler(val id:Int,
     }
   }
 
+  class TaskQueue[T](){
+    val buffer = new ArrayBuffer[T]()
+    val index  = 0
+
+    def +=(elem: T): Unit = {
+      buffer += elem
+    }
+
+    def remove(chunksize:Int=1): Option[ArrayBuffer[T]] = {
+      None
+    }
+
+  }
 
   def launchTasks() : Unit = {
     if(NEXECUTORS==0) {
@@ -78,7 +91,7 @@ class SecondLevelScheduler(val id:Int,
       return
     }
 
-    val proxytask = if(taskQueue.isEmpty ==false) {
+    val proxytask = if(taskQueue.isEmpty==false){
       taskQueue.dequeue()
     } else {
       logInfo("<<<DISTS Queue is empty!!!")
@@ -87,20 +100,6 @@ class SecondLevelScheduler(val id:Int,
     // logInfo(s"<<<EXP executors $execList")
 
     launchTask(proxytask)
-
-    // val taskd = proxytask.toTaskDescription()
-
-    // val eid = r.nextInt(NEXECUTORS)
-
-    // executorDataMap.get(execList(eid)) match {
-    //   case Some(data) =>
-    //     logInfo(s"<<< EXP SENDING TASK to exec ${data.executorEndpoint}")
-    //     val sertdesc = closureSerializer.serialize[TaskDescription](taskd)
-    //     data.executorEndpoint.send(LaunchTask(this.self,new SerializableBuffer(sertdesc) ))
-    //   case None =>
-    //     logInfo(s"<<<NO WAY EID($eid) is not in the executors List!!!")
-    //     assert(false)
-    // }
 
   }
 
@@ -111,31 +110,7 @@ class SecondLevelScheduler(val id:Int,
 
     taskArray.foreach( ftask => {
       launchTask(ftask)
-      // val eid = ftask.task.preferredLocations match{
-      //   case Nil    =>
-      //     logInfo(s"<<<Dist Scheculing task $ftask.taskId NO LOCATIONS FOUND")
-      //     execList(r.nextInt(NEXECUTORS) ) //pick a random executor
-      //   case locSeq =>
-      //     logInfo(s"<<<Dist Scheculing task $ftask.taskId locs:"+locSeq.mkString(","))
-      //     locSeq(0) match {
-      //       case ExecutorCacheTaskLocation(host,execid) =>
-      //         execid
-      //       case _                                      =>
-      //         execList(r.nextInt(NEXECUTORS) ) //pick a random executor
-      //     }
-      // }
-
-      // executorDataMap.get(eid) match {
-      //   case Some(data) =>
-      //     logInfo(s"<<< EXP SENDING TASK to exec ${data.executorEndpoint}")
-      //     val taskd = ftask.toTaskDescription()
-      //     val sertdesc = closureSerializer.serialize[TaskDescription](taskd)
-      //     data.executorEndpoint.send(LaunchTask(this.self,new SerializableBuffer(sertdesc) ))
-      //   case None =>
-      //     logInfo(s"<<<NO WAY EID($eid) is not in the executors List!!!")
-      //     assert(false)
-      // }
-      })
+    })
 
   }
 
@@ -170,12 +145,12 @@ class SecondLevelScheduler(val id:Int,
 
     override def receive: PartialFunction[Any,Unit] = {
       case msg@StatusUpdate(executorId, taskId, state, data) =>
-        logInfo(s"<<< SID($id) StatusUpdate fwd msg $msg to $masterDriver")
+        // logInfo(s"<<< SID($id) StatusUpdate fwd msg $msg to $masterDriver")
         masterDriver.send(msg)
         if (TaskState.isFinished(state)) {
           executorDataMap.get(executorId) match {
             case Some(executorInfo) =>
-              launchTasks()
+              // launchTasks()
             case None =>
               // Ignoring the update since we don't know about the executor.
               logWarning(s"Ignored task status update ($taskId state $state) " +
@@ -187,16 +162,6 @@ class SecondLevelScheduler(val id:Int,
         logInfo(s"**2LScheduler fwd msg $msg to $masterDriver")
         masterDriver.send(msg)
 
-      // case msg@BatchRddOperators(executorId, rddid, ops, jobId, taskf) =>
-      //   assert(false,"Nesting not yet supported")
-      //   logInfo(s"**2LScheduler fwd msg $msg to $masterDriver")
-      //   logInfo("--DEBUG caught BatchOperators Message")
-      //   masterDriver.send(msg)
-
-      // case msg@NestingFinished(execId) =>
-      //   logInfo(s"**2LScheduler fwd msg $msg to $masterDriver")
-      //   masterDriver.send(msg)
-
       case ProxyLaunchTasks(taskset,indexes) =>
         // logInfo(s"<<<EXP SLS received the TaskSet $indexes !!!")
         assert(taskset.tasks.length == indexes.length)
@@ -207,11 +172,9 @@ class SecondLevelScheduler(val id:Int,
         )
 
         if(NEXECUTORS==0){
-          //keep the tasks for later
           logInfo("<<< DISTS Enqueueing taskset for later use")
           taskQueue ++= taskds
         } else {
-          // logInfo("<<< DISTS immediately launching tasks")
           launchTasks(taskds)
         }
       case UpdateExecData(eid,data) =>
