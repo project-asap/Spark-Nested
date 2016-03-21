@@ -28,6 +28,7 @@ import scala.util.control.NonFatal
 import scala.collection.mutable.Queue
 import java.io.{ByteArrayOutputStream, DataInputStream, DataOutputStream}
 import org.apache.spark.util.{SerializableBuffer}
+import java.util.{TimerTask, Timer}
 
 // import scala.collection.mutable.ArrayBuffer
 
@@ -55,6 +56,14 @@ class SecondLevelScheduler(val id:Int,
 
   logInfo(s"<<< EXP SecondLevelScheduling $this started! $NEXECUTORS")
 
+  private val starvationTimer = new Timer(true)
+
+  // starvationTimer.scheduleAtFixedRate(new TimerTask() {
+  //   override def run() {
+  //     launchTasks()
+  //   }
+  // }
+  
   class FutureTask(val taskId: Long, val task: Task[_]){
     def toTaskDescription() = {
 
@@ -91,22 +100,25 @@ class SecondLevelScheduler(val id:Int,
       return
     }
 
-    val proxytask = if(taskQueue.isEmpty==false){
-      taskQueue.dequeue()
-    } else {
-      logInfo("<<<DISTS Queue is empty!!!")
-      return
+    while(taskQueue.isEmpty==false){
+      val proxytask = taskQueue.dequeue()
+
+// if(taskQueue.isEmpty==false){
+      // } else {
+        // logInfo("<<<DISTS Queue is empty!!!")
+        // return
+      // }
+      launchTask(proxytask)
     }
     // logInfo(s"<<<EXP executors $execList")
 
-    launchTask(proxytask)
 
   }
 
   def launchTasks(taskArray: Array[FutureTask]): Unit = {
     assert(NEXECUTORS>0)
 
-    // logInfo(s"<<<EXP executors $execList")
+    logInfo(s"<<<EXP executors ${execList.mkString(",")}")
 
     taskArray.foreach( ftask => {
       launchTask(ftask)
@@ -117,10 +129,12 @@ class SecondLevelScheduler(val id:Int,
   def launchTask(ftask: FutureTask): Unit = {
       val eid = ftask.task.preferredLocations match{
         case Nil    =>
-          // logInfo(s"<<<Dist Scheculing task $ftask.taskId NO LOCATIONS FOUND")
+          logInfo(s"<<<DS($id) tid ${ftask.taskId} j: ${ftask.task.jobId} NO LOCATIONS FOUND")
           execList(r.nextInt(NEXECUTORS) ) //pick a random executor
         case locSeq =>
-          // logInfo(s"<<<Dist Scheculing task $ftask.taskId locs:"+locSeq.mkString(","))
+          logInfo(
+            s"<<< DS($id) tid ${ftask.taskId} j: ${ftask.task.jobId} l:"+locSeq.mkString(",")
+          )
           val l = r.nextInt(locSeq.length)
           locSeq(l) match {
             case ExecutorCacheTaskLocation(host,execid) =>
@@ -132,7 +146,7 @@ class SecondLevelScheduler(val id:Int,
 
       executorDataMap.get(eid) match {
         case Some(data) =>
-          logInfo(s"<<< EXP SENDING TASK to exec ${data.executorEndpoint}")
+          logInfo(s"<<< DS($id) SENDING TASK to exec ${data.executorHost}")
           val taskd = ftask.toTaskDescription()
           val sertdesc = closureSerializer.serialize[TaskDescription](taskd)
           data.executorEndpoint.send(LaunchTask(this.self,new SerializableBuffer(sertdesc) ))
@@ -150,7 +164,7 @@ class SecondLevelScheduler(val id:Int,
         if (TaskState.isFinished(state)) {
           executorDataMap.get(executorId) match {
             case Some(executorInfo) =>
-              // launchTasks()
+              launchTasks()
             case None =>
               // Ignoring the update since we don't know about the executor.
               logWarning(s"Ignored task status update ($taskId state $state) " +

@@ -203,7 +203,7 @@ private[spark] class TaskSchedulerImpl(
   }
 
   //distScheduling submit
-  def submitTasksDist(taskSet: TaskSet) {
+  def submitTasksDist(taskSet: TaskSet) = {
     val tasks = taskSet.tasks
 
     val clock = new SystemClock()

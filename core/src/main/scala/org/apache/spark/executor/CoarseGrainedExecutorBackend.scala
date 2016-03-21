@@ -93,12 +93,11 @@ private[spark] class CoarseGrainedExecutorBackend(
     case RegisteredExecutor(hostname,dscheduler) =>
       logInfo(s"Successfully registered with driver $dscheduler")
       executor = new Executor(executorId, hostname, env, userClassPath, isLocal = false)
-      driver2Level = driver
-      // if(dscheduler != null ){
-        // Some(dscheduler)
-      // } else {
-        // driver
-      // }
+      driver2Level = if(dscheduler != null ){
+        Some(dscheduler)
+      } else {
+        driver
+      }
     case RegisterExecutorFailed(message) =>
       logError("Slave registration failed: " + message)
       System.exit(1)

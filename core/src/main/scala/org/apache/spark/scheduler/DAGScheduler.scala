@@ -1058,7 +1058,9 @@ class DAGScheduler(
       else {
         //distributed Scheduling mode
         logInfo(s"<<< DS scheduling takset $taskset")
-        taskScheduler.submitTasksDist(taskset)
+        this.synchronized {
+          taskScheduler.submitTasksDist(taskset)
+        }
       }
       stage.latestInfo.submissionTime = Some(clock.getTimeMillis())
 

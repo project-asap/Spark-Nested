@@ -322,7 +322,7 @@ class CoarseGrainedSchedulerBackend(scheduler: TaskSchedulerImpl, val rpcEnv: Rp
   }
 
   //distScheduling
-  def launchTasksDist(taskset:TaskSet,indexes: Array[Long]) = {
+  def launchTasksDist(taskset:TaskSet,indexes: Array[Long]) = synchronized {
     //slice the taskset into many sub tasksets to increase parallelism
     indexes.grouped(NSCHEDULERS).toArray.zip(taskset.slice(NSCHEDULERS)).foreach(
       pair => {
@@ -352,7 +352,7 @@ class CoarseGrainedSchedulerBackend(scheduler: TaskSchedulerImpl, val rpcEnv: Rp
     dSchedulers = Array.tabulate(NSCHEDULERS)( i =>
       rpcEnv.setupEndpoint(s"SecondaryScheduler$i",
         new SecondLevelScheduler(
-          i,rpcEnv,driverEndpoint,executorDataMap,scheduler.sc.addedFiles,scheduler.sc.addedJars))
+          i,rpcEnv,driverEndpoint,executorDataMap.clone,scheduler.sc.addedFiles,scheduler.sc.addedJars))
     )
   }
 
