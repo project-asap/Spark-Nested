@@ -186,7 +186,9 @@ class CoarseGrainedSchedulerBackend(scheduler: TaskSchedulerImpl, val rpcEnv: Rp
           context.reply(RegisteredExecutor(executorAddress.host,assignedScheduler))
           listenerBus.post(
             SparkListenerExecutorAdded(System.currentTimeMillis(), executorId, data))
-          // makeOffers()
+          if(dschedulingEnabled==false){
+            makeOffers()
+          }
         }
 
       case StopDriver =>
@@ -324,11 +326,11 @@ class CoarseGrainedSchedulerBackend(scheduler: TaskSchedulerImpl, val rpcEnv: Rp
   //distScheduling
   def launchTasksDist(taskset:TaskSet,indexes: Array[Long]) = synchronized {
     //slice the taskset into many sub tasksets to increase parallelism
-    indexes.grouped(NSCHEDULERS).toArray.zip(taskset.slice(NSCHEDULERS)).foreach(
+    indexes.grouped(NSCHEDULERS).toArray.zip(taskset.slice(NSCHEDULERS)).par.foreach(
       pair => {
-        val subtasks = pair._2
+        val subtasks   = pair._2
         val subindices = pair._1
-      val sid = r.nextInt(NSCHEDULERS)
+        val sid        = r.nextInt(NSCHEDULERS)
       logInfo(s"<<< DISTD sending taskset to SCHEDULER $sid")
       dSchedulers(sid).send(ProxyLaunchTasks(subtasks,subindices))
     })

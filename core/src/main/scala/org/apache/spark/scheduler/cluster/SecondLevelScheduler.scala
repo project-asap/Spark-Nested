@@ -58,12 +58,6 @@ class SecondLevelScheduler(val id:Int,
 
   private val starvationTimer = new Timer(true)
 
-  // starvationTimer.scheduleAtFixedRate(new TimerTask() {
-  //   override def run() {
-  //     launchTasks()
-  //   }
-  // }
-  
   class FutureTask(val taskId: Long, val task: Task[_]){
     def toTaskDescription() = {
 
@@ -103,23 +97,14 @@ class SecondLevelScheduler(val id:Int,
     while(taskQueue.isEmpty==false){
       val proxytask = taskQueue.dequeue()
 
-// if(taskQueue.isEmpty==false){
-      // } else {
-        // logInfo("<<<DISTS Queue is empty!!!")
-        // return
-      // }
       launchTask(proxytask)
     }
-    // logInfo(s"<<<EXP executors $execList")
-
 
   }
 
   def launchTasks(taskArray: Array[FutureTask]): Unit = {
     assert(NEXECUTORS>0)
-
-    logInfo(s"<<<EXP executors ${execList.mkString(",")}")
-
+    // logInfo(s"<<<EXP executors ${execList.mkString(",")}")
     taskArray.foreach( ftask => {
       launchTask(ftask)
     })
