@@ -5,9 +5,9 @@
  *  The ASF licenses this file to You under the Apache License, Version 2.0
  *  (the "License"); you may not use this file except in compliance with
  *  the License.  You may obtain a copy of the License at
- * 
- *     http://www.apache.org/licenses/LICENSE-2.0
- * 
+ *
+ *  http://www.apache.org/licenses/LICENSE-2.0
+ *
  *  Unless required by applicable law or agreed to in writing, software
  *  distributed under the License is distributed on an "AS IS" BASIS,
  *  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -32,17 +32,6 @@ import collection.mutable.HashMap
 
 //experimental
 
-object  hierTypes {
-
-  type partfType[T,S] = (T,S) => Int
-
-  type aggrfType[T,A] = (Seq[T]) => A
-
-  type advfType[S] = (Int,S) => S
-}
-
-import hierTypes._
-
 trait Splittable[A] {
 
   def id : Int
@@ -57,12 +46,6 @@ trait Splittable[A] {
 
 }
 
-/**
-  *  :: DeveloperApi ::
-  * 
-  *  Say something
-  */
-// @DeveloperApi
 //TODO add support for traverse operator !!
 //TODO fix arguments ...
 //TODO aggregate funtion remove ??
@@ -116,8 +99,20 @@ class HierRDDv2[T: ClassTag](
 }
 
 ///////////////////////////////////////////////
-//  MAYBE ERASE TILL EOF ???
+//  BACK UP FUNCTIONS
 ///////////////////////////////////////////////
+object  hierTypes {
+
+  type partfType[T,S] = (T,S) => Int
+
+  type aggrfType[T,A] = (Seq[T]) => A
+
+  type advfType[S] = (Int,S) => S
+}
+
+import hierTypes._
+
+
 private[spark] class valHierPartition[T, S, A](
   @transient rdd: RDD[T],
   idx: Int,
