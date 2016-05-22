@@ -43,6 +43,30 @@ import org.apache.spark.util.collection.OpenHashMap
 import org.apache.spark.util.random.{BernoulliSampler, PoissonSampler, BernoulliCellSampler,
   SamplingUtils}
 
+//<<extra imports
+import java.io._
+import scala.concurrent.Await
+import akka.util.Timeout
+import akka.pattern.ask
+import akka.actor._
+import org.apache.spark.scheduler.local.{LocalBackend}
+import org.apache.spark.executor.{CoarseGrainedExecutorBackend}
+import org.apache.spark.scheduler.cluster.CoarseGrainedClusterMessage
+import org.apache.spark.scheduler._
+import org.apache.spark.Dependency
+import org.apache.spark.executor._
+import scala.reflect.runtime.{universe=>ru}
+import scala.reflect.runtime.universe._
+import org.apache.spark.util.{CallSite, ClosureCleaner, MetadataCleaner, MetadataCleanerType, TimeStampedWeakValueHashMap, Utils}
+import scala.concurrent.Future
+import scala.util.{Success, Failure}
+import scala.concurrent.ExecutionContext.Implicits.global
+import scala.concurrent.duration._
+import org.apache.spark.scheduler.cluster.CoarseGrainedClusterMessages._
+
+import org.apache.spark.rdd._
+//>>
+
 /**
  * A Resilient Distributed Dataset (RDD), the basic abstraction in Spark. Represents an immutable,
  * partitioned collection of elements that can be operated on in parallel. This class contains the
@@ -73,7 +97,7 @@ import org.apache.spark.util.random.{BernoulliSampler, PoissonSampler, Bernoulli
  */
 abstract class RDD[T: ClassTag](
     @transient private var _sc: SparkContext,
-    @transient private var deps: Seq[Dependency[_]]
+    var deps: Seq[Dependency[_]]
   ) extends Serializable with Logging {
 
   if (classOf[RDD[_]].isAssignableFrom(elementClassTag.runtimeClass)) {
@@ -83,13 +107,13 @@ abstract class RDD[T: ClassTag](
   }
 
   private def sc: SparkContext = {
-    if (_sc == null) {
-      throw new SparkException(
-        "RDD transformations and actions can only be invoked by the driver, not inside of other " +
-        "transformations; for example, rdd1.map(x => rdd2.values.count() * x) is invalid because " +
-        "the values transformation and count action cannot be performed inside of the rdd1.map " +
-        "transformation. For more information, see SPARK-5063.")
-    }
+    // if (_sc == null) {
+    //   throw new SparkException(
+    //     "RDD transformations and actions can only be invoked by the driver, not inside of other " +
+    //     "transformations; for example, rdd1.map(x => rdd2.values.count() * x) is invalid because " +
+    //     "the values transformation and count action cannot be performed inside of the rdd1.map " +
+    //     "transformation. For more information, see SPARK-5063.")
+    // }
     _sc
   }
 
@@ -137,7 +161,7 @@ abstract class RDD[T: ClassTag](
   def sparkContext: SparkContext = sc
 
   /** A unique ID for this RDD (within its SparkContext). */
-  val id: Int = sc.newRddId()
+  var id: Int = if( sc !=null ) sc.newRddId() else 0 //will get the id later if 0
 
   /** A friendly name for this RDD */
   @transient var name: String = null
@@ -319,11 +343,43 @@ abstract class RDD[T: ClassTag](
 
   /**
    * Return a new RDD by applying a function to all elements of this RDD.
-   */
-  def map[U: ClassTag](f: T => U): RDD[U] = withScope {
-    val cleanF = sc.clean(f)
-    new MapPartitionsRDD[U, T](this, (context, pid, iter) => iter.map(cleanF))
+    */
+  def map[U: ClassTag](f: T => U): RDD[U] = {
+  //def map[U: ClassTag](f: T => U): RDD[U] = withScope {
+   if( sc == null){ //running outside the master context
+     implicit val timeout = Timeout(100.millis) //TODO fix timeout val
+     ClosureCleaner.clean(f,true)
+     val driver = CoarseGrainedExecutorBackend.executorRef
+     assert(driver != null)
+     logInfo(s"--DEBUG nested MAP--NULL POINTER-- SCHEDULER($driver) NPAR(${getPartitions.size})" )
+     assert(getPartitions != null)
+     assert(getPartitions.size >0)
+     assert(this != null)
+     try{
+       driver.send(AppendRddOperator(this.id,"map",Seq(f, classTag[U])))
+       val frdd  = new FutureRDD[T,U](this, this.id, "map", getPartitions.size)
+       logInfo(s"--DEBUG nested MAP new FutureRDD(${this.id})")
+       frdd
+     }catch {
+        case e : Exception =>
+         logInfo("--DEBUG rdd map : exception caught" + e)
+         val sw = new StringWriter
+         e.printStackTrace(new PrintWriter(sw))
+         logInfo(sw.toString)
+         // logInfo(e.printStackTrace)
+
+         null
+      }
+   }else{
+      val cleanF = sc.clean(f)
+      new MapPartitionsRDD[U, T](this, (context, pid, iter) => iter.map(cleanF))
+   }
   }
+
+  // def map[U: ClassTag](f: T => U): RDD[U] = withScope {
+  //   val cleanF = sc.clean(f)
+  //   new MapPartitionsRDD[U, T](this, (context, pid, iter) => iter.map(cleanF))
+  // }
 
   /**
    *  Return a new RDD by first applying a function to all elements of this
@@ -336,14 +392,38 @@ abstract class RDD[T: ClassTag](
 
   /**
    * Return a new RDD containing only the elements that satisfy a predicate.
-   */
+    */
   def filter(f: T => Boolean): RDD[T] = withScope {
-    val cleanF = sc.clean(f)
-    new MapPartitionsRDD[T, T](
-      this,
-      (context, pid, iter) => iter.filter(cleanF),
-      preservesPartitioning = true)
+    // def filter(f: T => Boolean): RDD[T] = withscope {
+    if( sc == null){ //running outside the master context
+      implicit val timeout = Timeout(100.millis) //TODO fix timeout val
+      ClosureCleaner.clean(f,true)
+      val driver = CoarseGrainedExecutorBackend.executorRef
+      logInfo("--DEBUG running FILTER remotely : NULL POINTER : " + driver )
+      try{
+        driver.send(AppendRddOperator(this.id,"filter",Seq(f)))
+        new FutureRDD[T,T](this, this.id, "map", getPartitions.size)
+      }catch {
+        case e : Exception =>
+          logInfo("--DEBUG rdd map : exception caught")
+          null
+      }
+    }else{
+      val cleanF = sc.clean(f)
+      new MapPartitionsRDD[T, T](
+        this,
+        (context, pid, iter) => iter.filter(cleanF),
+        preservesPartitioning = true)
+    }
   }
+
+  // def filter(f: T => Boolean): RDD[T] = withScope {
+  //   val cleanF = sc.clean(f)
+  //   new MapPartitionsRDD[T, T](
+  //     this,
+  //     (context, pid, iter) => iter.filter(cleanF),
+  //     preservesPartitioning = true)
+  // }
 
   /**
    * Return a new RDD containing the distinct elements in this RDD.
@@ -1617,7 +1697,8 @@ abstract class RDD[T: ClassTag](
   private var storageLevel: StorageLevel = StorageLevel.NONE
 
   /** User code that created this RDD (e.g. `textFile`, `parallelize`). */
-  @transient private[spark] val creationSite = sc.getCallSite()
+  //nesting tinkering
+  @transient private[spark] val creationSite = if(sc != null ) sc.getCallSite() else null
 
   /**
    * The scope associated with the operation that created this RDD.
@@ -1836,4 +1917,22 @@ object RDD {
     : DoubleRDDFunctions = {
     new DoubleRDDFunctions(rdd.map(x => num.toDouble(x)))
   }
+
+  //nesting extra---
+  def call(rdd: RDD[_], methodName:String, args:AnyRef*):AnyRef = {
+    def argtypes = args.map(_.getClass)
+    def method = rdd.getClass().getMethods().filter( m => m.getName.equals(methodName) ).toList.head
+    try{
+      method.invoke(rdd,args: _*)
+    }catch{
+      case e : Exception =>
+        // logInfo("--DEBUG RDD reflection method invoke exception....")
+      null
+    }
+  }
+
+  def depsToString( depSeq: Seq[Dependency[_]] ) : String = {
+    depSeq.map( dep => dep.rdd.toString).reduceLeft(  _ + "-->" + _)
+  }
+  //---
 }

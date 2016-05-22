@@ -29,6 +29,12 @@ import org.apache.spark.scheduler.cluster.CoarseGrainedClusterMessages._
 import org.apache.spark.scheduler.cluster.CoarseGrainedSchedulerBackend.ENDPOINT_NAME
 import org.apache.spark.util.{ThreadUtils, SerializableBuffer, AkkaUtils, Utils}
 
+import org.apache.spark.rdd._
+import scala.concurrent.ExecutionContext
+
+import java.nio.ByteBuffer
+import scala.util.Random
+
 /**
  * A scheduler backend that waits for coarse grained executors to connect to it through Akka.
  * This backend holds onto each executor for the duration of the Spark job rather than relinquishing
@@ -88,6 +94,11 @@ class CoarseGrainedSchedulerBackend(scheduler: TaskSchedulerImpl, val rpcEnv: Rp
 
     override protected def log = CoarseGrainedSchedulerBackend.this.log
 
+    //nesting
+    private var nextActorId = 0
+    val secondEnpoint = rpcEnv.setupEndpoint("SecondaryEndpoint", new SecondaryEndpoint(rpcEnv))
+
+
     protected val addressToExecutorId = new HashMap[RpcAddress, String]
 
     private val reviveThread =
@@ -103,6 +114,33 @@ class CoarseGrainedSchedulerBackend(scheduler: TaskSchedulerImpl, val rpcEnv: Rp
         }
       }, 0, reviveIntervalMs, TimeUnit.MILLISECONDS)
     }
+
+    class SecondaryEndpoint(override val rpcEnv: RpcEnv) extends ThreadSafeRpcEndpoint with Logging {
+      private val closureSerializer = SparkEnv.get.closureSerializer.newInstance()
+
+      override protected def log = CoarseGrainedSchedulerBackend.this.log
+
+      override def receive: PartialFunction[Any, Unit] = {
+        case msg@BatchRddOperators(executorId, rddid, ops, jobId, taskfunc) =>
+          logInfo("--DEBUG called BatchCollect ops.length:" +ops.length)
+          var rdd = scheduler.sc.dagScheduler.lookupRDD(rddid)
+          ops.foreach(op =>
+            op match {
+              case(method,args) => rdd = RDD.call(rdd,method,args: _*).asInstanceOf[RDD[_]]
+            })
+          logInfo("--DEBUG foreach REFLECTION loop complete")
+          val executorData = executorDataMap.get(executorId)
+          executorData.get.freeCores += scheduler.CPUS_PER_TASK
+
+          val start = System.currentTimeMillis()
+          val results = scheduler.sc.submitNestedJob(rdd ,taskfunc,
+            0 until rdd.partitions.size, false, null ,(jobId, executorData.get.executorEndpoint)
+          )
+          // CoarseGrainedSchedulerBackend.schedulerRuntime.getAndAdd( System.currentTimeMillis() - start )
+          logInfo(s"--DEBUG SE NESTED : $rddid partitions ${executorData.get.executorEndpoint}" )
+      }
+    }
+
 
     override def receive: PartialFunction[Any, Unit] = {
       case StatusUpdate(executorId, taskId, state, data) =>
@@ -130,6 +168,18 @@ class CoarseGrainedSchedulerBackend(scheduler: TaskSchedulerImpl, val rpcEnv: Rp
             // Ignoring the task kill since the executor is not registered.
             logWarning(s"Attempted to kill task $taskId for unknown executor $executorId.")
         }
+
+      case msg@BatchRddOperators(executorId, rddid, ops, jobId, taskf) =>
+        // nextActorId += 1
+        logInfo("--DEBUG caught BatchOperators Message")
+        // val executorData = executorDataMap.get(executorId)
+        secondEnpoint.send(msg)
+
+      //katsogr extra
+      case NestingFinished(execId) =>
+          val executorData = executorDataMap(execId)
+          executorData.freeCores -= scheduler.CPUS_PER_TASK
+
     }
 
     override def receiveAndReply(context: RpcCallContext): PartialFunction[Any, Unit] = {

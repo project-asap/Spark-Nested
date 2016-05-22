@@ -1997,6 +1997,29 @@ class SparkContext(config: SparkConf) extends Logging with ExecutorAllocationCli
     new SimpleFutureAction(waiter, resultFunc)
   }
 
+  def submitNestedJob[T, U: ClassTag](
+    rdd: RDD[T],
+    func: Iterator[T] => U,
+    partitions: Seq[Int],
+    allowLocal: Boolean,
+    resultHandler: (Int, U) => Unit,
+    sendAddr: (Int, RpcEndpointRef))
+  {
+    val callSite = getCallSite
+    val cleanF = clean(func)
+    val processFunc = (context: TaskContext, iter: Iterator[T]) => cleanF(iter)
+    val cleanedFunc = clean(processFunc)
+    logInfo("Starting job: " + callSite.shortForm)
+    logInfo("--DEBUG submitting nested JOB")
+    val start = System.nanoTime
+    dagScheduler.runJobNoWait(rdd, cleanedFunc, partitions, callSite, false,
+      resultHandler, localProperties.get, sendAddr)
+    logInfo(
+      "Job finished: " + callSite.shortForm + ", took " + (System.nanoTime - start) / 1e9 + " s")
+
+  }
+
+
   /**
    * Submit a map stage for execution. This is currently an internal API only, but might be
    * promoted to DeveloperApi in the future.

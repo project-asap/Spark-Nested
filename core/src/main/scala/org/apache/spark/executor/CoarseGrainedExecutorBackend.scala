@@ -35,6 +35,31 @@ import org.apache.spark.scheduler.cluster.CoarseGrainedClusterMessages._
 import org.apache.spark.serializer.SerializerInstance
 import org.apache.spark.util.{ThreadUtils, SignalLogger, Utils}
 
+//extra imports
+import org.apache.spark.scheduler.cluster.CoarseGrainedClusterMessage
+// import org.apache.spark.scheduler.cluster.CoarseGrainedClusterMessages._
+import scala.collection.mutable.{HashMap, Stack, Queue}
+import collection.mutable
+import org.apache.spark.scheduler._
+import org.apache.spark.rdd._
+import scala.concurrent._
+import scala.concurrent.Await
+import org.apache.spark.scheduler.local.{LocalBackend}
+import org.apache.spark.scheduler._
+import org.apache.spark.executor._
+import scala.reflect.runtime.{universe=>ru}
+import scala.reflect.runtime.universe._
+import org.apache.spark.util.{CallSite, ClosureCleaner, MetadataCleaner, MetadataCleanerType, TimeStampedWeakValueHashMap, Utils}
+import scala.concurrent.Future
+import scala.util.{Success, Failure}
+import scala.concurrent.ExecutionContext.Implicits.global
+import scala.concurrent.duration._
+import java.util.concurrent.atomic.AtomicInteger
+import scala.collection.mutable.{ArrayBuffer,Queue}
+import scala.reflect.{classTag, ClassTag}
+//>>
+
+
 private[spark] class CoarseGrainedExecutorBackend(
     override val rpcEnv: RpcEnv,
     driverUrl: String,
@@ -47,6 +72,21 @@ private[spark] class CoarseGrainedExecutorBackend(
 
   var executor: Executor = null
   @volatile var driver: Option[RpcEndpointRef] = None
+
+  var rddOpMap = new HashMap[Int, Seq[(String,Seq[AnyRef])]] //keep all the rdd operators, and after collect send them
+  val nestedTaskMap = new HashMap[Long, (Int, RpcEndpointRef)] //(taskId->executorRef)
+  private val EMPTY_BYTE_BUFFER = ByteBuffer.wrap(new Array[Byte](0))
+
+  //TODO organize tuple in a class!!!!
+  var runJobMap = new HashMap[Int,(Int,(Int,Int,Any) => Unit)]()
+
+  var collectID = 0
+
+  def newJobId() : Int = {
+    collectID += 1
+    collectID
+  }
+
 
   // If this CoarseGrainedExecutorBackend is changed to support multiple threads, then this may need
   // to be changed so that we don't share the serializer instance across threads
@@ -97,6 +137,17 @@ private[spark] class CoarseGrainedExecutorBackend(
           taskDesc.name, taskDesc.serializedTask)
       }
 
+    case LaunchNestedTask(data,sendAddr,index) =>
+      assert(executor != null)
+      val ser = SparkEnv.get.closureSerializer.newInstance()
+      val taskDesc = ser.deserialize[TaskDescription](data.value)
+      logInfo( s"--DEBUG EID($executorId) LNT NESTED ${taskDesc.taskId} ${sendAddr} ")
+
+      nestedTaskMap += (taskDesc.taskId -> (index, sendAddr))
+      executor.launchTask(this, taskDesc.taskId, attemptNumber = taskDesc.attemptNumber,
+        taskDesc.name, taskDesc.serializedTask)
+      logInfo( s"--DEBUG  EID($executorId) launched NESTED task $sendAddr")
+
     case KillTask(taskId, _, interruptThread) =>
       if (executor == null) {
         logError("Received KillTask command but executor was null")
@@ -111,10 +162,71 @@ private[spark] class CoarseGrainedExecutorBackend(
       // a message to self to actually do the shutdown.
       self.send(Shutdown)
 
+    case RunJobMsg(rddid,ntasks,taskfunc,rhandler) =>
+      logInfo(s"--DEBUG CGEB request to run Nested Job for RDD($rddid) N($ntasks)")
+      val nextJob = newJobId()
+      runJobMap.update(nextJob,(ntasks,rhandler))
+      val cfunc = taskfunc.asInstanceOf[Iterator[Any]=>Any]
+      val msg = BatchRddOperators(executorId,rddid,rddOpMap(rddid),nextJob,cfunc)//f function
+      safeMsg(msg)
+      rddOpMap.update(rddid,List())
+
+    case AppendRddOperator(rddid,op,args) =>
+      logInfo(s"RDD $rddid pushes another arguemnt in the list")
+      rddOpMap.get(rddid) match {
+        case Some(list) => rddOpMap.update(rddid,list:+(op,args))
+        case None => rddOpMap.update(rddid,Seq((op,args)))
+      }
+
+    case StatusUpdateExtended(eid,collectID,state,outId,data) =>
+      assert( state == TaskState.FINISHED )
+      logInfo("--DEBUG Status Update Extended")
+      //katsogr TODO handle IndirectTaskResult .....
+      val index:Int = collectID.asInstanceOf[Int] // katsogr quick fix...
+      val ser = SparkEnv.get.closureSerializer.newInstance()//deserialize first
+
+      try {
+        val result = ser.deserialize[TaskResult[Any]](data.value) match {
+          case directResult: DirectTaskResult[_] => directResult
+          case IndirectTaskResult(blockId, size) =>
+            logInfo(s"--DEBUG IndirectTaskResult ID($blockId)")
+            val bm = SparkEnv.get.blockManager
+            val serializedTaskResult = bm.getRemoteBytes(blockId)
+            val deserializedResult = ser.deserialize[DirectTaskResult[_]](
+              serializedTaskResult.get)
+            bm.master.removeBlock(blockId)
+            deserializedResult
+        }
+
+        logInfo(s"--DEBUG case STATUSUPDATE EID($eid) INDEX($index) OID($outId)")
+
+        val (n,f) = runJobMap(index) //TODO getOrElse( throw new Execption() )
+        assert(n>0)
+
+        f(n,outId,result.value)
+        runJobMap.update(index,(n-1,f)) //append the data decrease the counter
+        if(n==1){ //last element to go
+          logInfo(s"--DEBUG QUEUE->NOTIFY")
+          val msg = NestingFinished(executorId)
+          safeMsg(msg)
+        }
+      } catch {
+        case cnf: ClassNotFoundException =>
+          logError("--ERROR ClassNotFound")
+        case ex: Exception =>
+          logError("Exception while getting task result", ex)
+      }
+
+
     case Shutdown =>
       executor.stop()
       stop()
       rpcEnv.shutdown()
+  }
+
+  def safeMsg(msg: CoarseGrainedClusterMessage) = driver match {
+    case Some(driverRef) => driverRef.send(msg)
+    case None => logWarning(s"Drop $msg because has not yet connected to driver")
   }
 
   override def onDisconnected(remoteAddress: RpcAddress): Unit = {
@@ -136,6 +248,16 @@ private[spark] class CoarseGrainedExecutorBackend(
 }
 
 private[spark] object CoarseGrainedExecutorBackend extends Logging {
+
+  var executorRef: RpcEndpointRef = null
+  //taskId to (n,results,_,_)
+  var collectMap = new HashMap[Int,(Long,Array[Any],Option[Iterator[Any] => Any],Option[(Int, Any) => Unit])]()
+  //katsogr TODO remove array from hash
+  // var collectMap = new HashMap[Int,(Long,Option[Iterator[Any] => Any],Option[(Int, Any) => Unit])]()
+
+
+  var collectID : AtomicInteger = new AtomicInteger(0)
+
 
   private def run(
       driverUrl: String,
@@ -191,8 +313,10 @@ private[spark] object CoarseGrainedExecutorBackend extends Logging {
       // client mode only, and does not accept incoming connections.
       val sparkHostPort = env.conf.getOption("spark.executor.port").map { port =>
           hostname + ":" + port
-        }.orNull
-      env.rpcEnv.setupEndpoint("Executor", new CoarseGrainedExecutorBackend(
+      }.orNull
+      //nesting set executorRef
+      CoarseGrainedExecutorBackend.executorRef =
+        env.rpcEnv.setupEndpoint("Executor", new CoarseGrainedExecutorBackend(
         env.rpcEnv, driverUrl, executorId, sparkHostPort, cores, userClassPath, env))
       workerUrl.foreach { url =>
         env.rpcEnv.setupEndpoint("WorkerWatcher", new WorkerWatcher(env.rpcEnv, url))

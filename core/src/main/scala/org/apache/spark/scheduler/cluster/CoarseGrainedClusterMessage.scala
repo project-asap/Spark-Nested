@@ -33,6 +33,9 @@ private[spark] object CoarseGrainedClusterMessages {
   // Driver to executors
   case class LaunchTask(data: SerializableBuffer) extends CoarseGrainedClusterMessage
 
+  case class LaunchNestedTask(data: SerializableBuffer, addr: RpcEndpointRef, index: Int) extends CoarseGrainedClusterMessage
+
+
   case class KillTask(taskId: Long, executor: String, interruptThread: Boolean)
     extends CoarseGrainedClusterMessage
 
@@ -56,13 +59,47 @@ private[spark] object CoarseGrainedClusterMessages {
   case class StatusUpdate(executorId: String, taskId: Long, state: TaskState,
     data: SerializableBuffer) extends CoarseGrainedClusterMessage
 
+  case class StatusUpdateExtended(
+    executorId: String, taskId: Long, state: TaskState, outId : Int,
+    data: SerializableBuffer) extends CoarseGrainedClusterMessage
+
   object StatusUpdate {
     /** Alternate factory method that takes a ByteBuffer directly for the data field */
     def apply(executorId: String, taskId: Long, state: TaskState, data: ByteBuffer)
       : StatusUpdate = {
       StatusUpdate(executorId, taskId, state, new SerializableBuffer(data))
     }
+
+    def apply(executorId: String, taskId: Long, state: TaskState, out: Int, data: ByteBuffer) = {
+      StatusUpdateExtended(executorId, taskId, state, out, new SerializableBuffer(data))
+    }
+
   }
+
+  case class AppendRddOperator[T,U](rddid: Int, op:String, args: Seq[AnyRef]) extends CoarseGrainedClusterMessage
+
+  case class BatchRddOperators(
+    exId:String,
+    rddid: Int,
+    ops: Seq[(String,Seq[AnyRef])],
+    jobId:Int,
+    taskFunc: Iterator[Any] => Any
+  ) extends CoarseGrainedClusterMessage
+
+  /*
+   Message sent from Executor to Scheduler when a level of nesting has finished in order
+   for the scheduler to unblock the executor
+   */
+  case class NestingFinished(ex:String) extends CoarseGrainedClusterMessage
+
+  case class RunJobMsg[T,U](
+    rdidd: Int,
+    ntasks: Int,
+    func: Iterator[T] => U,
+    resultHandler: (Int,Int,U) => Unit
+  ) extends CoarseGrainedClusterMessage
+
+
 
   // Internal messages in driver
   case object ReviveOffers extends CoarseGrainedClusterMessage

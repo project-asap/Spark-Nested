@@ -41,6 +41,9 @@ import org.apache.spark.storage._
 import org.apache.spark.util._
 import org.apache.spark.storage.BlockManagerMessages.BlockManagerHeartbeat
 
+import scala.reflect.ClassTag
+import org.apache.spark.rpc.RpcEndpointRef
+
 /**
  * The high-level scheduling layer that implements stage-oriented scheduling. It computes a DAG of
  * stages for each job, keeps track of which RDDs and stage outputs are materialized, and finds a
@@ -183,6 +186,28 @@ class DAGScheduler(
 
   private[scheduler] val eventProcessLoop = new DAGSchedulerEventProcessLoop(this)
   taskScheduler.setDAGScheduler(this)
+
+  //nesting extra
+  private val id2RDD = new HashMap[ Int , RDD[_] ]
+
+  private val taskDestination = new HashMap[Int,(Int, RpcEndpointRef)]
+  //---
+
+  //nesting extra---
+  def registerRDD( id:Int , rdd : RDD[_] ) = {
+    assert( id2RDD.getOrElse(id,null) == null )//
+    id2RDD.synchronized{
+      id2RDD += (id->rdd)
+    }
+  }
+  def lookupRDD( id:Int ) : RDD[_] = {
+    logInfo("--DAG successfull RDD lookup from id sent by worker ")
+    id2RDD.synchronized{
+      id2RDD(id)
+    }
+  }
+  //---
+
 
   /**
    * Called by the TaskSetManager to report task's starting.
@@ -650,6 +675,30 @@ class DAGScheduler(
     listener.awaitResult()    // Will throw an exception if the job fails
   }
 
+    /**
+    * nesting schedule runJob withoud wait for the results
+    * extra argument that tells the executor where to send the result
+    */
+  def runJobNoWait[T,U : ClassTag](
+    rdd: RDD[T],
+    func: (TaskContext, Iterator[T]) => U,
+    partitions: Seq[Int],
+    callSite: CallSite,
+    allowLocal: Boolean,
+    resultHandler: (Int, U) => Unit,
+    properties: Properties = null,
+    sendToAddr: (Int, RpcEndpointRef)) //katsogr extra argument for directly forwarding nested tasks
+  {
+    val jobId = nextJobId.getAndIncrement()
+    logInfo(s"DAGScheculer runJobNoWait $jobId $sendToAddr")
+    taskDestination += (jobId -> sendToAddr)
+    val func2 = func.asInstanceOf[(TaskContext, Iterator[_]) => _]
+    assert(partitions.size > 0 )
+    handleNestedJob(
+      jobId, rdd, func2, partitions.toArray, allowLocal, callSite, null , properties)
+
+  }
+
   /**
    * Submit a shuffle map stage to run independently and get a JobWaiter object back. The waiter
    * can be used to block until the the job finishes executing or can be used to cancel the job.
@@ -862,6 +911,60 @@ class DAGScheduler(
 
     submitWaitingStages()
   }
+
+  //nesting extra---
+  private[scheduler] def handleNestedJob(jobId: Int,
+    finalRDD: RDD[_],
+    func: (TaskContext, Iterator[_]) => _,
+    partitions: Array[Int],
+    allowLocal: Boolean,
+    callSite: CallSite,
+    listener: JobListener,
+    properties: Properties = null
+  )
+  {
+    var finalStage: ResultStage = null
+    logInfo( s"--DEBUG DAG JobSubmitted $finalRDD $jobId" )
+    try {
+      // New stage creation may throw an exception if, for example, jobs are run on a
+      // HadoopRDD whose underlying HDFS files have been deleted.
+      finalStage = newResultStage(finalRDD, func, partitions, jobId, callSite)
+    } catch {
+      case e: Exception =>
+        logWarning("Creating new stage failed due to exception - job: " + jobId, e)
+        listener.jobFailed(e)
+        return
+    }
+    if (finalStage != null) {
+      val job = new ActiveJob(jobId, finalStage, callSite, listener, properties)
+      clearCacheLocs()
+      logInfo("Got job %s (%s) with %d output partitions (allowLocal=%s)".format(
+        job.jobId, callSite.shortForm, partitions.length, allowLocal))
+      logInfo("Final stage: " + finalStage + "(" + finalStage.name + ")")
+      logInfo("Parents of final stage: " + finalStage.parents)
+      logInfo("Missing parents: " + getMissingParentStages(finalStage))
+      // val shouldRunLocally =
+        // localExecutionEnabled && allowLocal && finalStage.parents.isEmpty && partitions.length == 1
+      val jobSubmissionTime = clock.getTimeMillis()
+      // if (shouldRunLocally) {
+      //   // Compute very short actions like first() or take() with no parent stages locally.
+      //   listenerBus.post(
+      //     SparkListenerJobStart(job.jobId, jobSubmissionTime, Seq.empty, properties))
+      //   runLocally(job)
+      // } else {
+        jobIdToActiveJob(jobId) = job
+        activeJobs += job
+        finalStage.setActiveJob(job)
+        val stageIds = jobIdToStageIds(jobId).toArray
+        val stageInfos = stageIds.flatMap(id => stageIdToStage.get(id).map(_.latestInfo))
+        listenerBus.post(
+          SparkListenerJobStart(job.jobId, jobSubmissionTime, stageInfos, properties))
+        submitStage(finalStage)
+      // }
+    }
+    submitWaitingStages()
+  }
+
 
   private[scheduler] def handleMapStageSubmitted(jobId: Int,
       dependency: ShuffleDependency[_, _, _],
