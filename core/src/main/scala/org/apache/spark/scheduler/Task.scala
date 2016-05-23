@@ -49,6 +49,7 @@ private[spark] abstract class Task[T](
     val stageId: Int,
     val stageAttemptId: Int,
     val partitionId: Int,
+    val jobId: Int = 0,
     internalAccumulators: Seq[Accumulator[Long]]) extends Serializable {
 
   /**

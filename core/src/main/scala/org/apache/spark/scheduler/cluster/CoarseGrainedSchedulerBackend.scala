@@ -291,11 +291,24 @@ class CoarseGrainedSchedulerBackend(scheduler: TaskSchedulerImpl, val rpcEnv: Rp
         else {
           val executorData = executorDataMap(task.executorId)
           executorData.freeCores -= scheduler.CPUS_PER_TASK
-          executorData.executorEndpoint.send(LaunchTask(new SerializableBuffer(serializedTask)))
+
+          //nesting hacks
+          scheduler.sc.dagScheduler.taskDestination.get(task.jobId) match {
+            case Some(tup) =>
+              executorDataMap.get(task.executorId) match {
+                case Some(executorInfo) =>
+                  executorInfo.executorEndpoint.send(
+                    LaunchNestedTask(new SerializableBuffer(serializedTask), tup._2, tup._1))
+                case None =>
+                  logWarning(s"Attempted to launch nested task for unknown executor $task.executorId.")
+              }
+            case None =>
+              executorData.executorEndpoint.send(LaunchTask(new SerializableBuffer(serializedTask)))
+
+          }
         }
       }
     }
-
     // Remove a disconnected slave from the cluster
     def removeExecutor(executorId: String, reason: ExecutorLossReason): Unit = {
       executorDataMap.get(executorId) match {

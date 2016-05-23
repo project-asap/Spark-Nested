@@ -163,6 +163,8 @@ abstract class RDD[T: ClassTag](
   /** A unique ID for this RDD (within its SparkContext). */
   var id: Int = if( sc !=null ) sc.newRddId() else 0 //will get the id later if 0
 
+  if( sc != null && id !=0 ) sc.dagScheduler.registerRDD( id , this )
+
   /** A friendly name for this RDD */
   @transient var name: String = null
 
@@ -1003,7 +1005,7 @@ abstract class RDD[T: ClassTag](
   /**
    * Return an array that contains all of the elements in this RDD.
    */
-  def collect(): Array[T] = withScope {
+  def collect(): Array[T] = {
     val results = sc.runJob(this, (iter: Iterator[T]) => iter.toArray)
     Array.concat(results: _*)
   }
@@ -1708,7 +1710,9 @@ abstract class RDD[T: ClassTag](
    * user instantiates this RDD himself without using any Spark operations.
    */
   @transient private[spark] val scope: Option[RDDOperationScope] = {
-    Option(sc.getLocalProperty(SparkContext.RDD_SCOPE_KEY)).map(RDDOperationScope.fromJson)
+    //nesting hacks
+    if(sc!=null) Option(sc.getLocalProperty(SparkContext.RDD_SCOPE_KEY)).map(RDDOperationScope.fromJson)
+    else None
   }
 
   private[spark] def getCreationSite: String = Option(creationSite).map(_.shortForm).getOrElse("")

@@ -190,7 +190,7 @@ class DAGScheduler(
   //nesting extra
   private val id2RDD = new HashMap[ Int , RDD[_] ]
 
-  private val taskDestination = new HashMap[Int,(Int, RpcEndpointRef)]
+  val taskDestination = new HashMap[Int,(Int, RpcEndpointRef)]
   //---
 
   //nesting extra---
@@ -694,8 +694,10 @@ class DAGScheduler(
     taskDestination += (jobId -> sendToAddr)
     val func2 = func.asInstanceOf[(TaskContext, Iterator[_]) => _]
     assert(partitions.size > 0 )
+    val waiter = new JobWaiter(this, jobId, partitions.size, resultHandler)
+
     handleNestedJob(
-      jobId, rdd, func2, partitions.toArray, allowLocal, callSite, null , properties)
+      jobId, rdd, func2, partitions.toArray, allowLocal, callSite, waiter , properties)
 
   }
 
@@ -1128,7 +1130,7 @@ class DAGScheduler(
             val locs = taskIdToLocations(id)
             val part = stage.rdd.partitions(id)
             new ShuffleMapTask(stage.id, stage.latestInfo.attemptId,
-              taskBinary, part, locs, stage.internalAccumulators)
+              taskBinary, part, jobId=jobId, locs, stage.internalAccumulators)
           }
 
         case stage: ResultStage =>
@@ -1138,7 +1140,7 @@ class DAGScheduler(
             val part = stage.rdd.partitions(p)
             val locs = taskIdToLocations(id)
             new ResultTask(stage.id, stage.latestInfo.attemptId,
-              taskBinary, part, locs, id, stage.internalAccumulators)
+              taskBinary, part, locs, id, jobId=jobId, stage.internalAccumulators)
           }
       }
     } catch {

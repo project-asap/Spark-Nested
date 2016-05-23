@@ -46,8 +46,9 @@ private[spark] class ResultTask[T, U](
     partition: Partition,
     locs: Seq[TaskLocation],
     val outputId: Int,
+    jobId: Int, //nesting hacks
     internalAccumulators: Seq[Accumulator[Long]])
-  extends Task[U](stageId, stageAttemptId, partition.index, internalAccumulators)
+  extends Task[U](stageId, stageAttemptId, partition.index, jobId=jobId,internalAccumulators)
   with Serializable {
 
   @transient private[this] val preferredLocs: Seq[TaskLocation] = {
