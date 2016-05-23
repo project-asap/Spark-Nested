@@ -163,11 +163,11 @@ private[spark] class CoarseGrainedExecutorBackend(
       self.send(Shutdown)
 
     case RunJobMsg(rddid,ntasks,taskfunc,rhandler) =>
-      logInfo(s"--DEBUG CGEB request to run Nested Job for RDD($rddid) N($ntasks)")
+      logInfo(s"--DEBUG CGEB EID($executorId) request to run Nested Job for RDD($rddid) N($ntasks)")
       val nextJob = newJobId()
       runJobMap.update(nextJob,(ntasks,rhandler))
-      val cfunc = taskfunc.asInstanceOf[Iterator[Any]=>Any]
-      val msg = BatchRddOperators(executorId,rddid,rddOpMap(rddid),nextJob,cfunc)//f function
+      val cfunc   = taskfunc.asInstanceOf[Iterator[Any]=>Any]
+      val msg     = BatchRddOperators(executorId,rddid,rddOpMap(rddid),nextJob,cfunc)//f function
       safeMsg(msg)
       rddOpMap.update(rddid,List())
 
@@ -239,10 +239,47 @@ private[spark] class CoarseGrainedExecutorBackend(
   }
 
   override def statusUpdate(taskId: Long, state: TaskState, data: ByteBuffer) {
+    logInfo( s"--DEBUG E EID($executorId) TID($taskId) $state")
+    if(state == TaskState.FINISHED){
+      nestedTaskMap.get(taskId.asInstanceOf[Int]) match {
+        case Some((index,addr)) =>
+          //
+          logInfo(s"--DEBUG sending result from TASK $taskId to ADDR $addr INDEX $index")
+          assert(false)
+          // addr   ! StatusUpdate(executorId, index<<16 | taskId, state, data)
+          addr.send(StatusUpdate(executorId, index, TaskState.FINISHED, data))
+          val msg = StatusUpdate(executorId, taskId, TaskState.NESTED_FINISHED, EMPTY_BYTE_BUFFER)//++empty data
+          safeMsg(msg)
+        case None =>
+          val msg = StatusUpdate(executorId, taskId, state, data)
+          safeMsg(msg)
+      }
+    }else{
+      val msg = StatusUpdate(executorId, taskId, state, data)
+      safeMsg(msg)
+    }
+  }
+
+  def statusUpdate(taskId: Long, state: TaskState, outId: Int, data: ByteBuffer) {
+    logInfo( s"--DEBUG E EID($executorId) TID($taskId) $state")
+
     val msg = StatusUpdate(executorId, taskId, state, data)
-    driver match {
-      case Some(driverRef) => driverRef.send(msg)
-      case None => logWarning(s"Drop $msg because has not yet connected to driver")
+    if(state == TaskState.FINISHED){
+      nestedTaskMap.get(taskId.asInstanceOf[Int]) match {
+        case Some((index,addr)) =>
+          logInfo(s"--DEBUG sending result from TASK $taskId to ADDR $addr INDEX $index")
+          addr.send(StatusUpdate(executorId, index, state, outId, data))
+          val msg = StatusUpdate(executorId, taskId, TaskState.NESTED_FINISHED, EMPTY_BYTE_BUFFER)//++empty data
+          safeMsg(msg)
+        case None =>
+          val msg = StatusUpdate(executorId, taskId, state, data)
+          safeMsg(msg)
+      }
+    } else {
+      driver match {
+        case Some(driverRef) => driverRef.send(msg)
+        case None => logWarning(s"Drop $msg because has not yet connected to driver")
+      }
     }
   }
 }

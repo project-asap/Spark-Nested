@@ -3,7 +3,7 @@
  * contributor license agreements.  See the NOTICE file distributed with
  * this work for additional information regarding copyright ownership.
  * The ASF licenses this file to You under the Apache License, Version 2.0
- * (the "License"); you may not use this file except in compliance with
+k * (the "License"); you may not use this file except in compliance with
  * the License.  You may obtain a copy of the License at
  *
  *    http://www.apache.org/licenses/LICENSE-2.0
@@ -31,7 +31,7 @@ import org.apache.spark._
 import org.apache.spark.deploy.SparkHadoopUtil
 import org.apache.spark.memory.TaskMemoryManager
 import org.apache.spark.rpc.RpcTimeout
-import org.apache.spark.scheduler.{DirectTaskResult, IndirectTaskResult, Task}
+import org.apache.spark.scheduler.{DirectTaskResult, IndirectTaskResult, ResultTask, Task}
 import org.apache.spark.shuffle.FetchFailedException
 import org.apache.spark.storage.{StorageLevel, TaskResultBlockId}
 import org.apache.spark.util._
@@ -276,7 +276,20 @@ private[spark] class Executor(
           }
         }
 
-        execBackend.statusUpdate(taskId, TaskState.FINISHED, serializedResult)
+        //nesting hacks
+        val outputId = task match {
+          case t : ResultTask[_,_] => t.outputId
+          case _  => 0
+        }
+
+        logInfo(s"--DEBUG E task outputId = $outputId")
+        execBackend match {
+          case e : CoarseGrainedExecutorBackend =>
+            e.statusUpdate(taskId, TaskState.FINISHED, outputId, serializedResult)
+          case _ =>
+            execBackend.statusUpdate(taskId, TaskState.FINISHED, serializedResult)
+        }
+        // execBackend.statusUpdate(taskId, TaskState.FINISHED, serializedResult)
 
       } catch {
         case ffe: FetchFailedException =>

@@ -122,6 +122,7 @@ class CoarseGrainedSchedulerBackend(scheduler: TaskSchedulerImpl, val rpcEnv: Rp
 
       override def receive: PartialFunction[Any, Unit] = {
         case msg@BatchRddOperators(executorId, rddid, ops, jobId, taskfunc) =>
+          logInfo(s"--DEBUG BatchRDD from EID($executorId) JOB($jobId)")
           logInfo("--DEBUG called BatchCollect ops.length:" +ops.length)
           var rdd = scheduler.sc.dagScheduler.lookupRDD(rddid)
           ops.foreach(op =>
@@ -129,15 +130,16 @@ class CoarseGrainedSchedulerBackend(scheduler: TaskSchedulerImpl, val rpcEnv: Rp
               case(method,args) => rdd = RDD.call(rdd,method,args: _*).asInstanceOf[RDD[_]]
             })
           logInfo("--DEBUG foreach REFLECTION loop complete")
-          val executorData = executorDataMap.get(executorId)
-          executorData.get.freeCores += scheduler.CPUS_PER_TASK
-
-          val start = System.currentTimeMillis()
-          val results = scheduler.sc.submitNestedJob(rdd ,taskfunc,
-            0 until rdd.partitions.size, false, null ,(jobId, executorData.get.executorEndpoint)
-          )
+          executorDataMap.get(executorId) match {
+            case Some(executorInfo) =>
+              logInfo(s"--DEBUG SE NESTED : $rddid partitions ${executorInfo.executorEndpoint}" )
+              executorInfo.freeCores += scheduler.CPUS_PER_TASK
+              scheduler.sc.submitNestedJob(rdd ,taskfunc,
+                0 until rdd.partitions.size, false, null ,(jobId, executorInfo.executorEndpoint))
+            case None =>
+              assert(false)
+          }
           // CoarseGrainedSchedulerBackend.schedulerRuntime.getAndAdd( System.currentTimeMillis() - start )
-          logInfo(s"--DEBUG SE NESTED : $rddid partitions ${executorData.get.executorEndpoint}" )
       }
     }
 
