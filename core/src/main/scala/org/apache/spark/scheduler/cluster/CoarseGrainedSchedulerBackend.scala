@@ -121,8 +121,7 @@ class CoarseGrainedSchedulerBackend(scheduler: TaskSchedulerImpl, val rpcEnv: Rp
       override protected def log = CoarseGrainedSchedulerBackend.this.log
 
       override def receive: PartialFunction[Any, Unit] = {
-        case msg@BatchRddOperators(executorId, rddid, ops, jobId, taskfunc) =>
-          logInfo(s"--DEBUG BatchRDD from EID($executorId) JOB($jobId)")
+        case BatchRddOperators(executorId, rddid, ops, jobId, taskfunc) =>
           logInfo("--DEBUG called BatchCollect ops.length:" +ops.length)
           var rdd = scheduler.sc.dagScheduler.lookupRDD(rddid)
           ops.foreach(op =>
@@ -132,14 +131,14 @@ class CoarseGrainedSchedulerBackend(scheduler: TaskSchedulerImpl, val rpcEnv: Rp
           logInfo("--DEBUG foreach REFLECTION loop complete")
           executorDataMap.get(executorId) match {
             case Some(executorInfo) =>
-              logInfo(s"--DEBUG SE NESTED : $rddid partitions ${executorInfo.executorEndpoint}" )
+              logInfo(s"--DEBUG BatchOps from EID($executorId) HOST(${executorInfo.executorHost}) JOB($jobId)")
+              // logInfo(s"--DEBUG SUBMITNESTED $jobId ${executorInfo.executorHost}")
               executorInfo.freeCores += scheduler.CPUS_PER_TASK
               scheduler.sc.submitNestedJob(rdd ,taskfunc,
                 0 until rdd.partitions.size, false, null ,(jobId, executorInfo.executorEndpoint))
             case None =>
               assert(false)
           }
-          // CoarseGrainedSchedulerBackend.schedulerRuntime.getAndAdd( System.currentTimeMillis() - start )
       }
     }
 
@@ -173,14 +172,15 @@ class CoarseGrainedSchedulerBackend(scheduler: TaskSchedulerImpl, val rpcEnv: Rp
 
       case msg@BatchRddOperators(executorId, rddid, ops, jobId, taskf) =>
         // nextActorId += 1
-        logInfo("--DEBUG caught BatchOperators Message")
+        // logInfo("--DEBUG caught BatchOperators Message")
         // val executorData = executorDataMap.get(executorId)
         secondEnpoint.send(msg)
 
-      //katsogr extra
+      //katsogr extrai
       case NestingFinished(execId) =>
-          val executorData = executorDataMap(execId)
-          executorData.freeCores -= scheduler.CPUS_PER_TASK
+        logInfo(s"--DEBUG received NestingFinished from EID($execId)")
+        val executorData = executorDataMap(execId)
+        executorData.freeCores -= scheduler.CPUS_PER_TASK
 
     }
 
@@ -299,9 +299,14 @@ class CoarseGrainedSchedulerBackend(scheduler: TaskSchedulerImpl, val rpcEnv: Rp
             case Some(tup) =>
               executorDataMap.get(task.executorId) match {
                 case Some(executorInfo) =>
+                  val (outid,addr) = tup
+                  logInfo(
+                    s"""--DEBUG CGSB send LaunchNested EID(${executorInfo.executorHost})
+                     ID(${outid}) DEST(${addr.name})""")
                   executorInfo.executorEndpoint.send(
-                    LaunchNestedTask(new SerializableBuffer(serializedTask), tup._2, tup._1))
+                    LaunchNestedTask(new SerializableBuffer(serializedTask), addr, outid))
                 case None =>
+                  assert(false)
                   logWarning(s"Attempted to launch nested task for unknown executor $task.executorId.")
               }
             case None =>

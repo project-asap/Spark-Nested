@@ -690,7 +690,8 @@ class DAGScheduler(
     sendToAddr: (Int, RpcEndpointRef)) //katsogr extra argument for directly forwarding nested tasks
   {
     val jobId = nextJobId.getAndIncrement()
-    logInfo(s"DAGScheculer runJobNoWait $jobId $sendToAddr")
+    val (id,addr) = sendToAddr
+    logInfo(s"-- DEBUG DAG runJobNoWait $jobId OUTID($id) ADDR(${addr.name})")
     taskDestination += (jobId -> sendToAddr)
     val func2 = func.asInstanceOf[(TaskContext, Iterator[_]) => _]
     assert(partitions.size > 0 )

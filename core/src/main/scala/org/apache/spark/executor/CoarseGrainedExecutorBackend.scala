@@ -141,12 +141,12 @@ private[spark] class CoarseGrainedExecutorBackend(
       assert(executor != null)
       val ser = SparkEnv.get.closureSerializer.newInstance()
       val taskDesc = ser.deserialize[TaskDescription](data.value)
-      logInfo( s"--DEBUG EID($executorId) LNT NESTED ${taskDesc.taskId} ${sendAddr} ")
+      logInfo( s"--DEBUG EID($executorId) LAUNCHNESTED ${taskDesc.taskId} ${sendAddr} ")
 
       nestedTaskMap += (taskDesc.taskId -> (index, sendAddr))
       executor.launchTask(this, taskDesc.taskId, attemptNumber = taskDesc.attemptNumber,
         taskDesc.name, taskDesc.serializedTask)
-      logInfo( s"--DEBUG  EID($executorId) launched NESTED task $sendAddr")
+      // logInfo( s"--DEBUG  EID($executorId) launched NESTED task $sendAddr")
 
     case KillTask(taskId, _, interruptThread) =>
       if (executor == null) {
@@ -180,7 +180,6 @@ private[spark] class CoarseGrainedExecutorBackend(
 
     case StatusUpdateExtended(eid,collectID,state,outId,data) =>
       assert( state == TaskState.FINISHED )
-      logInfo("--DEBUG Status Update Extended")
       //katsogr TODO handle IndirectTaskResult .....
       val index:Int = collectID.asInstanceOf[Int] // katsogr quick fix...
       val ser = SparkEnv.get.closureSerializer.newInstance()//deserialize first
@@ -198,10 +197,12 @@ private[spark] class CoarseGrainedExecutorBackend(
             deserializedResult
         }
 
-        logInfo(s"--DEBUG case STATUSUPDATE EID($eid) INDEX($index) OID($outId)")
+        logInfo(s"--DEBUG STATUSUPDATEXTENDED THIS($executorId) EID($eid) INDEX($index) OID($outId)")
+        logInfo(s"--DEBUG runJobMap size(${runJobMap.size})")
 
         val (n,f) = runJobMap(index) //TODO getOrElse( throw new Execption() )
         assert(n>0)
+
 
         f(n,outId,result.value)
         runJobMap.update(index,(n-1,f)) //append the data decrease the counter
@@ -243,10 +244,8 @@ private[spark] class CoarseGrainedExecutorBackend(
     if(state == TaskState.FINISHED){
       nestedTaskMap.get(taskId.asInstanceOf[Int]) match {
         case Some((index,addr)) =>
-          //
-          logInfo(s"--DEBUG sending result from TASK $taskId to ADDR $addr INDEX $index")
+          logInfo(s"--DEBUG sendind statusUpdate TASK($taskId) ADDR($addr) INDEX($index)")
           assert(false)
-          // addr   ! StatusUpdate(executorId, index<<16 | taskId, state, data)
           addr.send(StatusUpdate(executorId, index, TaskState.FINISHED, data))
           val msg = StatusUpdate(executorId, taskId, TaskState.NESTED_FINISHED, EMPTY_BYTE_BUFFER)//++empty data
           safeMsg(msg)
@@ -263,7 +262,6 @@ private[spark] class CoarseGrainedExecutorBackend(
   def statusUpdate(taskId: Long, state: TaskState, outId: Int, data: ByteBuffer) {
     logInfo( s"--DEBUG E EID($executorId) TID($taskId) $state")
 
-    val msg = StatusUpdate(executorId, taskId, state, data)
     if(state == TaskState.FINISHED){
       nestedTaskMap.get(taskId.asInstanceOf[Int]) match {
         case Some((index,addr)) =>
@@ -276,6 +274,7 @@ private[spark] class CoarseGrainedExecutorBackend(
           safeMsg(msg)
       }
     } else {
+      val msg = StatusUpdate(executorId, taskId, state, data)
       driver match {
         case Some(driverRef) => driverRef.send(msg)
         case None => logWarning(s"Drop $msg because has not yet connected to driver")
