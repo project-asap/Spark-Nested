@@ -118,11 +118,11 @@ class DAGSchedulerSuite
       taskSet.tasks.foreach(_.epoch = mapOutputTracker.getEpoch)
       taskSets += taskSet
     }
-    override def submitTasksDist(taskSet: TaskSet) = {
-      // normally done by TaskSetManager
-      taskSet.tasks.foreach(_.epoch = mapOutputTracker.getEpoch)
-      taskSets += taskSet
-    }
+    // override def submitTasksDist(taskSet: TaskSet) = {
+    //   // normally done by TaskSetManager
+    //   taskSet.tasks.foreach(_.epoch = mapOutputTracker.getEpoch)
+    //   taskSets += taskSet
+    // }
 
     override def cancelTasks(stageId: Int, interruptThread: Boolean) {
       cancelledStages += stageId
@@ -463,9 +463,9 @@ class DAGSchedulerSuite
       override def submitTasks(taskSet: TaskSet): Unit = {
         taskSets += taskSet
       }
-      override def submitTasksDist(taskSet: TaskSet): Unit = {
-        taskSets += taskSet
-      }
+      // override def submitTasksDist(taskSet: TaskSet): Unit = {
+      //   taskSets += taskSet
+      // }
 
       override def cancelTasks(stageId: Int, interruptThread: Boolean) {
         throw new UnsupportedOperationException
