@@ -302,7 +302,7 @@ class CoarseGrainedSchedulerBackend(scheduler: TaskSchedulerImpl, val rpcEnv: Rp
                   val (outid,addr) = tup
                   logInfo(
                     s"""--DEBUG CGSB send LaunchNested EID(${executorInfo.executorHost})
-                     ID(${outid}) DEST(${addr.name})""")
+                     ID(${outid}) DEST(${addr})""")
                   executorInfo.executorEndpoint.send(
                     LaunchNestedTask(new SerializableBuffer(serializedTask), addr, outid))
                 case None =>

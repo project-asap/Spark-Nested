@@ -320,13 +320,15 @@ private[akka] class ErrorMonitor extends Actor with ActorLogReceive with Logging
     case Error(cause: Throwable, _, _, message: String) => logDebug(message, cause)
   }
 }
-
+//nesting removing transient vals
 private[akka] class AkkaRpcEndpointRef(
-    @transient private val defaultAddress: RpcAddress,
-    @transient private val _actorRef: () => ActorRef,
+    private val defaultAddress: RpcAddress,
+    private val _actorRef: () => ActorRef,
     conf: SparkConf,
     initInConstructor: Boolean)
   extends RpcEndpointRef(conf) with Logging {
+
+  // assert(false)
 
   def this(
       defaultAddress: RpcAddress,

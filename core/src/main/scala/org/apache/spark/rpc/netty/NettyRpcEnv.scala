@@ -81,7 +81,7 @@ private[netty] class NettyRpcEnv(
    * the main RPC context, so that events caused by these clients are kept isolated from the
    * main RPC traffic.
    *
-   * It also allows for different configuration of certain properties, such as the number of
+   * It also allows for different kconfiguration of certain properties, such as the number of
    * connections per peer.
    */
   @volatile private var fileDownloadFactory: TransportClientFactory = _
@@ -487,6 +487,8 @@ private[netty] class NettyRpcEndpointRef(
     endpointAddress: RpcEndpointAddress,
     @transient @volatile private var nettyEnv: NettyRpcEnv)
   extends RpcEndpointRef(conf) with Serializable with Logging {
+
+  assert(false)
 
   @transient @volatile var client: TransportClient = _
 
