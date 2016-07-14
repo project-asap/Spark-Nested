@@ -247,7 +247,7 @@ private[spark] class CoarseGrainedExecutorBackend(
           logInfo(s"--DEBUG sendind statusUpdate TASK($taskId) ADDR($addr) INDEX($index)")
           assert(false)
           addr.send(StatusUpdate(executorId, index, TaskState.FINISHED, data))
-          val msg = StatusUpdate(executorId, taskId, TaskState.NESTED_FINISHED, EMPTY_BYTE_BUFFER)//++empty data
+          val msg = StatusUpdate(executorId, taskId, TaskState.NESTED_FINISHED, EMPTY_BYTE_BUFFER)
           safeMsg(msg)
         case None =>
           val msg = StatusUpdate(executorId, taskId, state, data)

@@ -145,7 +145,9 @@ class CoarseGrainedSchedulerBackend(scheduler: TaskSchedulerImpl, val rpcEnv: Rp
 
     override def receive: PartialFunction[Any, Unit] = {
       case StatusUpdate(executorId, taskId, state, data) =>
-        scheduler.statusUpdate(taskId, state, data.value)
+        if( state != TaskState.NESTED_FINISHED ){
+          scheduler.statusUpdate(taskId, state, data.value)
+        }
         if (TaskState.isFinished(state)) {
           executorDataMap.get(executorId) match {
             case Some(executorInfo) =>
@@ -176,11 +178,22 @@ class CoarseGrainedSchedulerBackend(scheduler: TaskSchedulerImpl, val rpcEnv: Rp
         // val executorData = executorDataMap.get(executorId)
         secondEnpoint.send(msg)
 
-      //katsogr extrai
+      //katsogr extra
       case NestingFinished(execId) =>
         logInfo(s"--DEBUG received NestingFinished from EID($execId)")
-        val executorData = executorDataMap(execId)
-        executorData.freeCores -= scheduler.CPUS_PER_TASK
+
+        executorDataMap.get(execId) match {
+          case Some(executorInfo) =>
+            executorInfo.freeCores -= scheduler.CPUS_PER_TASK
+            assert(executorInfo.freeCores>=0)
+            makeOffers(execId)
+          case None =>
+            // Ignoring the update since we don't know about the executor.
+            // logWarning(s"Ignored task status update ($taskId state $state) " +
+              // s"from unknown executor with ID $executorId")
+        }
+
+        // executorData.freeCores -= scheduler.CPUS_PER_TASK
 
     }
 

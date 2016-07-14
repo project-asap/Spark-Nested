@@ -488,9 +488,10 @@ private[netty] class NettyRpcEndpointRef(
     @transient @volatile private var nettyEnv: NettyRpcEnv)
   extends RpcEndpointRef(conf) with Serializable with Logging {
 
-  assert(false)
+  // assert(false)
 
-  @transient @volatile var client: TransportClient = _
+  // @transient
+  @volatile var client: TransportClient = _
 
   private val _address = if (endpointAddress.rpcAddress != null) endpointAddress else null
   private val _name = endpointAddress.name
