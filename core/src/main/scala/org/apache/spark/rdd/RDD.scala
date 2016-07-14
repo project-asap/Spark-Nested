@@ -786,11 +786,11 @@ abstract class RDD[T: ClassTag](
   def mapPartitions[U: ClassTag](
       f: Iterator[T] => Iterator[U],
       preservesPartitioning: Boolean = false): RDD[U] = {
-    val cleanedF = sc.clean(f)
+    ClosureCleaner.clean(f,true) //sc.clean(f)
     if(sc != null){
       new MapPartitionsRDD(
         this,
-        (context: TaskContext, index: Int, iter: Iterator[T]) => cleanedF(iter),
+        (context: TaskContext, index: Int, iter: Iterator[T]) => f(iter),
         preservesPartitioning)
     } else {
       implicit val timeout = Timeout(100.millis) //TODO fix timeout val
@@ -801,8 +801,42 @@ abstract class RDD[T: ClassTag](
       assert(getPartitions.size >0)
       assert(this != null)
       try{
-        driver.send(AppendRddOperator(this.id,"mapPartitions",Seq(cleanedF, classTag[U])))
+        driver.send(AppendRddOperator(this.id,"mapPartitions",Seq(f, classTag[U])))
         val frdd = new FutureRDD[T,U](this, this.id, "mapPartitions", getPartitions.size)
+        logInfo(s"--DEBUG nested MAP new FutureRDD(${this.id})")
+        frdd
+      }catch {
+        case e : Exception =>
+          logInfo("--DEBUG rdd map : exception caught" + e)
+          val sw = new StringWriter
+          e.printStackTrace(new PrintWriter(sw))
+          logInfo(sw.toString)
+          // logInfo(e.printStackTrace)
+          null
+      }
+    }
+  }
+
+  def mapBlock[U: ClassTag](
+      f: Array[T] => Array[U],
+      preservesPartitioning: Boolean = false): RDD[U] = {
+    ClosureCleaner.clean(f,true) //sc.clean(f)
+    if(sc != null){
+      new MapBlockRDD(this, (context: TaskContext, index: Int, iter: Array[T]) => f(iter),
+      preservesPartitioning)
+    } else {
+      implicit val timeout = Timeout(100.millis) //TODO fix timeout val
+      val driver = CoarseGrainedExecutorBackend.executorRef
+      assert(driver != null)
+      logInfo(s"--DEBUG nested MAP--NULL SCHED($driver) NPAR(${getPartitions.size})" )
+      assert(getPartitions != null)
+      assert(getPartitions.size >0)
+      assert(this != null)
+      try{
+        driver.send(
+          AppendRddOperator(this.id,"mapBlock",Seq(f,true.asInstanceOf[AnyRef],classTag[U]))
+        )
+        val frdd = new FutureRDD[T,U](this, this.id, "mapBlock", getPartitions.size)
         logInfo(s"--DEBUG nested MAP new FutureRDD(${this.id})")
         frdd
       }catch {
