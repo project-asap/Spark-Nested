@@ -1997,7 +1997,7 @@ class SparkContext(config: SparkConf) extends Logging with ExecutorAllocationCli
     new SimpleFutureAction(waiter, resultFunc)
   }
 
-  def submitNestedJob[T, U: ClassTag](
+  def submitNestedJob[T: ClassTag, U: ClassTag](
     rdd: RDD[T],
     func: Iterator[T] => U,
     partitions: Seq[Int],
@@ -2011,6 +2011,8 @@ class SparkContext(config: SparkConf) extends Logging with ExecutorAllocationCli
     val cleanedFunc = clean(processFunc)
     logInfo("Starting job: " + callSite.shortForm)
     logInfo("--DEBUG submitting nested JOB")
+    logInfo(s"T == ${classTag[T]}")
+    logInfo(s"U == ${classTag[U]}")
     val start = System.nanoTime
     dagScheduler.runJobNoWait(rdd, cleanedFunc, partitions, callSite, false,
       resultHandler, localProperties.get, sendAddr)
@@ -2125,7 +2127,7 @@ class SparkContext(config: SparkConf) extends Logging with ExecutorAllocationCli
 
   private[spark] def newShuffleId(): Int = nextShuffleId.getAndIncrement()
 
-  private val nextRddId = new AtomicInteger(0)
+  private val nextRddId = new AtomicInteger(1)
 
   /** Register a new RDD, returning its RDD ID */
   private[spark] def newRddId(): Int = nextRddId.getAndIncrement()

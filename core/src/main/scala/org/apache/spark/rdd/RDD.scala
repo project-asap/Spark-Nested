@@ -118,7 +118,7 @@ abstract class RDD[T: ClassTag](
   }
 
   /** Construct an RDD with just a one-to-one dependency on one parent */
-  def this(@transient oneParent: RDD[_]) =
+  def this(oneParent: RDD[_]) =
     this(oneParent.context , List(new OneToOneDependency(oneParent)))
 
   private[spark] def conf = sc.conf
@@ -163,6 +163,7 @@ abstract class RDD[T: ClassTag](
   /** A unique ID for this RDD (within its SparkContext). */
   var id: Int = if( sc !=null ) sc.newRddId() else 0 //will get the id later if 0
 
+  //&& id != 0 ??
   if( sc != null && id !=0 ) sc.dagScheduler.registerRDD( id , this )
 
   /** A friendly name for this RDD */
@@ -353,7 +354,9 @@ abstract class RDD[T: ClassTag](
      ClosureCleaner.clean(f,true)
      val driver = CoarseGrainedExecutorBackend.executorRef
      assert(driver != null)
-     logInfo(s"--DEBUG nested MAP--NULL POINTER-- SCHEDULER($driver) NPAR(${getPartitions.size})" )
+     logInfo(s"--DEBUG nested MAP--NULL POINTER --SCHEDULER($driver) NPAR(${getPartitions.size})" )
+     logInfo(s"T == ${classTag[T]}, U == ${classTag[U]}")
+
      assert(getPartitions != null)
      assert(getPartitions.size >0)
      assert(this != null)
@@ -829,6 +832,7 @@ abstract class RDD[T: ClassTag](
       val driver = CoarseGrainedExecutorBackend.executorRef
       assert(driver != null)
       logInfo(s"--DEBUG nested MAP--NULL SCHED($driver) NPAR(${getPartitions.size})" )
+      logInfo(s"--DEBUG U == ${classTag[U]}")
       assert(getPartitions != null)
       assert(getPartitions.size >0)
       assert(this != null)

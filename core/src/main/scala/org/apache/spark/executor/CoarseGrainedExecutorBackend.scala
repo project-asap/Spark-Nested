@@ -164,9 +164,14 @@ private[spark] class CoarseGrainedExecutorBackend(
 
     case RunJobMsg(rddid,ntasks,taskfunc,rhandler) =>
       logInfo(s"--DEBUG CGEB EID($executorId) request to run Nested Job for RDD($rddid) N($ntasks)")
+      logInfo(s"TASKFUNC == ${ClassTag(taskfunc.getClass())}")
       val nextJob = newJobId()
       runJobMap.update(nextJob,(ntasks,rhandler))
       val cfunc   = taskfunc.asInstanceOf[Iterator[Any]=>Any]
+      val testf   = taskfunc.asInstanceOf[Iterator[Int]=>(Int,Int)]
+
+      val f = (iter: Iterator[Any]) => iter.toArray
+
       val msg     = BatchRddOperators(executorId,rddid,rddOpMap(rddid),nextJob,cfunc)//f function
       safeMsg(msg)
       rddOpMap.update(rddid,List())

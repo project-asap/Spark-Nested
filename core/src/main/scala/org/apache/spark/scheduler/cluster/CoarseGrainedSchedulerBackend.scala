@@ -184,7 +184,7 @@ class CoarseGrainedSchedulerBackend(scheduler: TaskSchedulerImpl, val rpcEnv: Rp
 
         executorDataMap.get(execId) match {
           case Some(executorInfo) =>
-            executorInfo.freeCores -= scheduler.CPUS_PER_TASK
+            // executorInfo.freeCores -= scheduler.CPUS_PER_TASK
             assert(executorInfo.freeCores>=0)
             makeOffers(execId)
           case None =>

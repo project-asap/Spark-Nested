@@ -72,10 +72,10 @@ class FutureRDD[T: ClassTag, U:ClassTag](prev: RDD[T], tag:Int, method:String, n
 
   logInfo(s"--DEBUG New Future RDD created $tag $ntasks")
 
-  override def collect( ) : Array[U] = {
+  override def collect( ): Array[U] = {
 
     logInfo(s"--DEBUG New Future RDD collect $tag $ntasks")
-    val driver : RpcEndpointRef = CoarseGrainedExecutorBackend.executorRef
+    val driver: RpcEndpointRef = CoarseGrainedExecutorBackend.executorRef
     assert( driver != null )
     val results = new Array[Any](ntasks)
     val rhandler = (rem:Int,index:Int,res:Any) => {
@@ -86,7 +86,7 @@ class FutureRDD[T: ClassTag, U:ClassTag](prev: RDD[T], tag:Int, method:String, n
     }
 
     try {
-      driver.send(RunJobMsg(tag,ntasks,(iter: Iterator[Any]) => iter.toArray,rhandler))
+      driver.send(RunJobMsg[U,Array[U]](tag,ntasks,(iter: Iterator[U]) => iter.toArray,rhandler))
 
       val list = results.synchronized {
         results.wait()
@@ -96,7 +96,7 @@ class FutureRDD[T: ClassTag, U:ClassTag](prev: RDD[T], tag:Int, method:String, n
       }
       Array.concat(list.asInstanceOf[Array[Array[U]]] : _*)
     } catch {
-      case e : Exception =>
+      case e: Exception =>
         logInfo(s"--DEBUG : FutureRDD $id collect : exception caught == "+e)
         logInfo("--DEBUG : TRACE  == "+e.getStackTraceString )
         null

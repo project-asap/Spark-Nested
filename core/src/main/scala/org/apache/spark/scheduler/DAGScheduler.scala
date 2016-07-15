@@ -678,8 +678,10 @@ class DAGScheduler(
     /**
     * nesting schedule runJob withoud wait for the results
     * extra argument that tells the executor where to send the result
-    */
-  def runJobNoWait[T,U : ClassTag](
+      */
+  import scala.reflect.{ClassTag, classTag}
+
+  def runJobNoWait[T: ClassTag,U: ClassTag](
     rdd: RDD[T],
     func: (TaskContext, Iterator[T]) => U,
     partitions: Seq[Int],
@@ -692,6 +694,7 @@ class DAGScheduler(
     val jobId = nextJobId.getAndIncrement()
     val (id,addr) = sendToAddr
     logInfo(s"-- DEBUG DAG runJobNoWait $jobId OUTID($id) ADDR(${addr.name})")
+    logInfo(s"--DEBUG DAG T==${classTag[T]} , U==${classTag[U]}")
     taskDestination += (jobId -> sendToAddr)
     val func2 = func.asInstanceOf[(TaskContext, Iterator[_]) => _]
     assert(partitions.size > 0 )
