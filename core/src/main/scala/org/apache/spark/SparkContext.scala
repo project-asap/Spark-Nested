@@ -2011,8 +2011,7 @@ class SparkContext(config: SparkConf) extends Logging with ExecutorAllocationCli
     val cleanedFunc = clean(processFunc)
     logInfo("Starting job: " + callSite.shortForm)
     logInfo("--DEBUG submitting nested JOB")
-    logInfo(s"T == ${classTag[T]}")
-    logInfo(s"U == ${classTag[U]}")
+    logInfo(s"T == ${classTag[T]}, U == ${classTag[U]}")
     val start = System.nanoTime
     dagScheduler.runJobNoWait(rdd, cleanedFunc, partitions, callSite, false,
       resultHandler, localProperties.get, sendAddr)

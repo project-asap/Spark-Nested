@@ -97,8 +97,7 @@ import org.apache.spark.rdd._
  */
 abstract class RDD[T: ClassTag](
     @transient private var _sc: SparkContext,
-    var deps: Seq[Dependency[_]],
-    regiterF: Boolean = false
+    var deps: Seq[Dependency[_]]
   ) extends Serializable with Logging {
 
   if (classOf[RDD[_]].isAssignableFrom(elementClassTag.runtimeClass)) {
@@ -121,9 +120,6 @@ abstract class RDD[T: ClassTag](
   /** Construct an RDD with just a one-to-one dependency on one parent */
   def this(oneParent: RDD[_]) =
     this(oneParent.context , List(new OneToOneDependency(oneParent)))
-
-  def this(oneParent: RDD[_], registerF: Boolean) =
-    this(oneParent.context , List(new OneToOneDependency(oneParent)), registerF)
 
   private[spark] def conf = sc.conf
   // =======================================================================

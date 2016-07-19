@@ -138,14 +138,10 @@ class CoarseGrainedSchedulerBackend(scheduler: TaskSchedulerImpl, val rpcEnv: Rp
                 }
             })
 
-          // val results = rdd.collect()
-          // results.foreach( r => logInfo(s"--DEBUG RESULTS $r"))
-
           logInfo(s"--DEBUG REFLECTION loop complete ${rdd.getClass()}")
           executorDataMap.get(executorId) match {
             case Some(executorInfo) =>
               logInfo(s"--DEBUG BatchOps from EID($executorId) HOST(${executorInfo.executorHost}) JOB($jobId)")
-              // logInfo(s"--DEBUG SUBMITNESTED $jobId ${executorInfo.executorHost}")
               executorInfo.freeCores += scheduler.CPUS_PER_TASK
               scheduler.sc.submitNestedJob(rdd ,taskfunc,
                 0 until rdd.partitions.size, false, null ,(jobId, executorInfo.executorEndpoint))
@@ -185,11 +181,33 @@ class CoarseGrainedSchedulerBackend(scheduler: TaskSchedulerImpl, val rpcEnv: Rp
             logWarning(s"Attempted to kill task $taskId for unknown executor $executorId.")
         }
 
-      case msg@BatchRddOperators(executorId, rddid, ops, jobId, taskf) =>
-        // nextActorId += 1
-        // logInfo("--DEBUG caught BatchOperators Message")
-        // val executorData = executorDataMap.get(executorId)
-        secondEnpoint.send(msg)
+      case BatchRddOperators(executorId, rddid, ops, jobId, taskfunc) =>
+        logInfo("--DEBUG called BatchCollect ops.length:" +ops.length)
+        var rdd = scheduler.sc.dagScheduler.lookupRDD(rddid)
+        logInfo(s"--DEBUG init ID($rddid) RDD(${rdd.getClass()})")
+        ops.foreach(op =>
+          op match {
+            case(method,args) =>
+              method match {
+                case "mapBlock" =>
+                  logInfo(s"--DEBUG replacing reflection")
+                  rdd = rdd.mapBlock[Any](args(0).asInstanceOf[Array[Any]=>Array[Any]])
+                case _ =>
+                  rdd = RDD.call(rdd,method,args: _*).asInstanceOf[RDD[Any]]
+              }
+          })
+
+        logInfo(s"--DEBUG REFLECTION loop complete ${rdd.getClass()}")
+        executorDataMap.get(executorId) match {
+          case Some(executorInfo) =>
+            logInfo(s"--DEBUG BatchOps from EID($executorId) HOST(${executorInfo.executorHost}) JOB($jobId)")
+            executorInfo.freeCores += scheduler.CPUS_PER_TASK
+            scheduler.sc.submitNestedJob(rdd ,taskfunc,
+              0 until rdd.partitions.size, false, null ,(jobId, executorInfo.executorEndpoint))
+          case None =>
+            assert(false)
+        }
+        // secondEnpoint.send(msg)
 
       //katsogr extra
       case NestingFinished(execId) =>
