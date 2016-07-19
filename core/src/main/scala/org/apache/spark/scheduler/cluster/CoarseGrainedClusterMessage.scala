@@ -76,7 +76,10 @@ private[spark] object CoarseGrainedClusterMessages {
 
   }
 
-  case class AppendRddOperator[T,U](rddid: Int, op:String, args: Seq[AnyRef]) extends CoarseGrainedClusterMessage
+  // case class AppendRddOperator(rddid: Int, op:String, args: Seq[AnyRef]) extends CoarseGrainedClusterMessage
+
+  import scala.reflect.runtime.universe._
+  import scala.reflect.{classTag, ClassTag}
 
   case class BatchRddOperators(
     exId:String,
@@ -96,7 +99,8 @@ private[spark] object CoarseGrainedClusterMessages {
     rdidd: Int,
     ntasks: Int,
     func: Iterator[T] => U,
-    resultHandler: (Int,Int,U) => Unit
+    resultHandler: (Int,Int,U) => Unit,
+    op_list: Seq[(String,Seq[AnyRef])]
   ) extends CoarseGrainedClusterMessage
 
 

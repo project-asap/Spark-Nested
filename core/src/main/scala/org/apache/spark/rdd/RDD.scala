@@ -97,7 +97,8 @@ import org.apache.spark.rdd._
  */
 abstract class RDD[T: ClassTag](
     @transient private var _sc: SparkContext,
-    var deps: Seq[Dependency[_]]
+    var deps: Seq[Dependency[_]],
+    regiterF: Boolean = false
   ) extends Serializable with Logging {
 
   if (classOf[RDD[_]].isAssignableFrom(elementClassTag.runtimeClass)) {
@@ -120,6 +121,9 @@ abstract class RDD[T: ClassTag](
   /** Construct an RDD with just a one-to-one dependency on one parent */
   def this(oneParent: RDD[_]) =
     this(oneParent.context , List(new OneToOneDependency(oneParent)))
+
+  def this(oneParent: RDD[_], registerF: Boolean) =
+    this(oneParent.context , List(new OneToOneDependency(oneParent)), registerF)
 
   private[spark] def conf = sc.conf
   // =======================================================================
@@ -164,7 +168,8 @@ abstract class RDD[T: ClassTag](
   var id: Int = if( sc !=null ) sc.newRddId() else 0 //will get the id later if 0
 
   //&& id != 0 ??
-  if( sc != null && id !=0 ) sc.dagScheduler.registerRDD( id , this )
+  // if( sc != null && id !=0 ) sc.dagScheduler.registerRDD( id , this )
+  if( sc != null && id !=0 ) sc.dagScheduler.registerRDD( id , this.asInstanceOf[RDD[Any]] )
 
   /** A friendly name for this RDD */
   @transient var name: String = null
@@ -361,9 +366,10 @@ abstract class RDD[T: ClassTag](
      assert(getPartitions.size >0)
      assert(this != null)
      try{
-       driver.send(AppendRddOperator(this.id,"map",Seq(f, classTag[U])))
-       val frdd  = new FutureRDD[T,U](this, this.id, "map", getPartitions.size)
-       logInfo(s"--DEBUG nested MAP new FutureRDD(${this.id})")
+       // driver.send(AppendRddOperator(this.id,"map",Seq(f, classTag[U])))
+       val op_list = Seq(("map",Seq(f,classTag[U])))
+       val frdd  = new FutureRDD[T,U](this, this.id, op_list, getPartitions.size)
+       logInfo(s"--DEBUG nested MAP new FutureRDD(${frdd.getClass()})")
        frdd
      }catch {
         case e : Exception =>
@@ -406,8 +412,9 @@ abstract class RDD[T: ClassTag](
       val driver = CoarseGrainedExecutorBackend.executorRef
       logInfo("--DEBUG running FILTER remotely : NULL POINTER : " + driver )
       try{
-        driver.send(AppendRddOperator(this.id,"filter",Seq(f)))
-        new FutureRDD[T,T](this, this.id, "map", getPartitions.size)
+        // driver.send(AppendRddOperator(this.id,"filter",Seq(f)))
+        val op_list = Seq(("filter",Seq(f)))
+        new FutureRDD[T,T](this, this.id, op_list, getPartitions.size)
       }catch {
         case e : Exception =>
           logInfo("--DEBUG rdd map : exception caught")
@@ -804,8 +811,9 @@ abstract class RDD[T: ClassTag](
       assert(getPartitions.size >0)
       assert(this != null)
       try{
-        driver.send(AppendRddOperator(this.id,"mapPartitions",Seq(f, classTag[U])))
-        val frdd = new FutureRDD[T,U](this, this.id, "mapPartitions", getPartitions.size)
+        // driver.send(AppendRddOperator(this.id,"mapPartitions",Seq(f, classTag[U])))
+        val op_list = Seq(("mapPartitions",Seq(f,classTag[U])))
+        val frdd = new FutureRDD[T,U](this, this.id, op_list, getPartitions.size)
         logInfo(s"--DEBUG nested MAP new FutureRDD(${this.id})")
         frdd
       }catch {
@@ -831,19 +839,19 @@ abstract class RDD[T: ClassTag](
       implicit val timeout = Timeout(100.millis) //TODO fix timeout val
       val driver = CoarseGrainedExecutorBackend.executorRef
       assert(driver != null)
-      logInfo(s"--DEBUG nested MAP--NULL SCHED($driver) NPAR(${getPartitions.size})" )
-      logInfo(s"--DEBUG U == ${classTag[U]}")
+      logInfo(s"--DEBUG nested mapBlock SCHED($driver) NPAR(${getPartitions.size})")
       assert(getPartitions != null)
       assert(getPartitions.size >0)
       assert(this != null)
       try{
-        driver.send(
-          AppendRddOperator(this.id,"mapBlock",Seq(f,true.asInstanceOf[AnyRef],classTag[U]))
-        )
-        val frdd = new FutureRDD[T,U](this, this.id, "mapBlock", getPartitions.size)
+        // driver.send(
+        //   AppendRddOperator(this.id,"mapBlock",Seq(f,true.asInstanceOf[AnyRef],classTag[U]))
+        // )
+        val op_list = Seq(("mapBlock",Seq(f,true.asInstanceOf[AnyRef],classTag[U])))
+        val frdd = new FutureRDD[T,U](this, this.id, op_list, getPartitions.size)
         logInfo(s"--DEBUG nested MAP new FutureRDD(${this.id})")
         frdd
-      }catch {
+      } catch {
         case e : Exception =>
           logInfo("--DEBUG rdd map : exception caught" + e)
           val sw = new StringWriter
@@ -1068,6 +1076,7 @@ abstract class RDD[T: ClassTag](
    * Return an array that contains all of the elements in this RDD.
    */
   def collect(): Array[T] = {
+    logInfo(s"--DEBUG Collect T==${classTag[T]}")
     val results = sc.runJob(this, (iter: Iterator[T]) => iter.toArray)
     Array.concat(results: _*)
   }
@@ -1985,7 +1994,7 @@ object RDD {
   }
 
   //nesting extra---
-  def call(rdd: RDD[_], methodName:String, args:AnyRef*):AnyRef = {
+  def call(rdd: RDD[Any], methodName:String, args:AnyRef*):Any = {
     def argtypes = args.map(_.getClass)
     def method = rdd.getClass().getMethods().filter( m => m.getName.equals(methodName) ).toList.head
     try{

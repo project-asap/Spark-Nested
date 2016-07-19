@@ -73,7 +73,7 @@ private[spark] class CoarseGrainedExecutorBackend(
   var executor: Executor = null
   @volatile var driver: Option[RpcEndpointRef] = None
 
-  var rddOpMap = new HashMap[Int, Seq[(String,Seq[AnyRef])]] //keep all the rdd operators, and after collect send them
+  // var rddOpMap = new HashMap[Int, Seq[(String,Seq[AnyRef])]] //keep all the rdd operators, and after collect send them
   val nestedTaskMap = new HashMap[Long, (Int, RpcEndpointRef)] //(taskId->executorRef)
   private val EMPTY_BYTE_BUFFER = ByteBuffer.wrap(new Array[Byte](0))
 
@@ -162,26 +162,25 @@ private[spark] class CoarseGrainedExecutorBackend(
       // a message to self to actually do the shutdown.
       self.send(Shutdown)
 
-    case RunJobMsg(rddid,ntasks,taskfunc,rhandler) =>
-      logInfo(s"--DEBUG CGEB EID($executorId) request to run Nested Job for RDD($rddid) N($ntasks)")
-      logInfo(s"TASKFUNC == ${ClassTag(taskfunc.getClass())}")
+    case RunJobMsg(rddid,ntasks,taskfunc,rhandler,op_list) =>
+      logInfo(s"--DEBUG CGEB EID($executorId) request Nested Job for RDD($rddid) N($ntasks)")
+      logInfo(s"--DEBUG TASKFUNC == ${ClassTag(taskfunc.getClass())}")
       val nextJob = newJobId()
       runJobMap.update(nextJob,(ntasks,rhandler))
-      val cfunc   = taskfunc.asInstanceOf[Iterator[Any]=>Any]
-      val testf   = taskfunc.asInstanceOf[Iterator[Int]=>(Int,Int)]
+      // val cfunc   = taskfunc.asInstanceOf(Iterator[Any]=>Any)
+      val cfunc   = (iter: Iterator[Any])=>iter.toArray
 
-      val f = (iter: Iterator[Any]) => iter.toArray
+      val msg     = BatchRddOperators(executorId,rddid,op_list,nextJob,cfunc)
+      // rddOpMap.update(rddid,List())
 
-      val msg     = BatchRddOperators(executorId,rddid,rddOpMap(rddid),nextJob,cfunc)//f function
       safeMsg(msg)
-      rddOpMap.update(rddid,List())
 
-    case AppendRddOperator(rddid,op,args) =>
-      logInfo(s"RDD $rddid pushes another arguemnt in the list")
-      rddOpMap.get(rddid) match {
-        case Some(list) => rddOpMap.update(rddid,list:+(op,args))
-        case None => rddOpMap.update(rddid,Seq((op,args)))
-      }
+    // case AppendRddOperator(rddid,op,args) =>
+    //   logInfo(s"--DEBUG RDD $rddid pushes operator, list size(${rddOpMap.get(rddid).size})")
+    //   rddOpMap.get(rddid) match {
+    //     case Some(list) => rddOpMap.update(rddid,list:+(op,args))
+    //     case None => rddOpMap.update(rddid,Seq((op,args)))
+    //   }
 
     case StatusUpdateExtended(eid,collectID,state,outId,data) =>
       assert( state == TaskState.FINISHED )

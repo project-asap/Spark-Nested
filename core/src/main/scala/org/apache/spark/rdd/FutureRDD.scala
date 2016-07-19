@@ -59,8 +59,10 @@ import scala.concurrent.duration._
 import scala.collection.mutable.ArrayBuffer
 
 //private[spark]
-class FutureRDD[T: ClassTag, U:ClassTag](prev: RDD[T], tag:Int, method:String, ntasks:Int)
-  extends RDD[U](prev) {
+import scala.reflect.runtime.universe._
+class FutureRDD[T: ClassTag, U:ClassTag]
+  (prev: RDD[T], tag:Int, op_list:Seq[(String,Seq[AnyRef])]= Nil, ntasks:Int)
+    extends RDD[U](prev) {
 
   logInfo(s"--DEBUG AOUT to creat New Future RDD created $tag $ntasks")
 
@@ -70,10 +72,9 @@ class FutureRDD[T: ClassTag, U:ClassTag](prev: RDD[T], tag:Int, method:String, n
 
   override def compute(split: Partition, context: TaskContext) = null
 
-  logInfo(s"--DEBUG New Future RDD created $tag $ntasks")
+  // logInfo(s"--DEBUG New Future RDD created $tag $ntasks")
 
-  override def collect( ): Array[U] = {
-
+  override def collect(): Array[U] = {
     logInfo(s"--DEBUG New Future RDD collect $tag $ntasks")
     val driver: RpcEndpointRef = CoarseGrainedExecutorBackend.executorRef
     assert( driver != null )
@@ -86,7 +87,8 @@ class FutureRDD[T: ClassTag, U:ClassTag](prev: RDD[T], tag:Int, method:String, n
     }
 
     try {
-      driver.send(RunJobMsg[U,Array[U]](tag,ntasks,(iter: Iterator[U]) => iter.toArray,rhandler))
+      logInfo(s"--DEBUG FutureRDD: T==${classTag[T]}, U==${classTag[U]}")
+      driver.send(RunJobMsg(tag,ntasks,(iter: Iterator[U]) => iter.toArray,rhandler,op_list))
 
       val list = results.synchronized {
         results.wait()
@@ -136,7 +138,7 @@ class FutureRDD[T: ClassTag, U:ClassTag](prev: RDD[T], tag:Int, method:String, n
     val driver : RpcEndpointRef = CoarseGrainedExecutorBackend.executorRef
     assert( driver != null )
     // try {
-    driver.send(RunJobMsg[U,Option[U]](tag,ntasks,reducePartition,mergeResult))
+    driver.send(RunJobMsg[U,Option[U]](tag,ntasks,reducePartition,mergeResult,op_list))
     sync.synchronized {
       sync.wait()
       logInfo("--DEBUG JOBRESULT NOTIFY RETURNED")

@@ -18,6 +18,7 @@
 package org.apache.spark.rdd
 
 import scala.reflect.ClassTag
+import scala.reflect.{classTag, ClassTag}
 
 import org.apache.spark.{Partition, TaskContext}
 
@@ -31,6 +32,8 @@ private[spark] class MapBlockRDD[U: ClassTag, T: ClassTag](
 
   override def getPartitions: Array[Partition] = firstParent[T].partitions
 
-  override def compute(split: Partition, context: TaskContext) =
+  override def compute(split: Partition, context: TaskContext) = {
+    logInfo(s"--DEBUG inside compute T==${classTag[T]} U==${classTag[U]}")
     f(context, split.index, firstParent[T].iterator(split, context).toArray).toIterator
+  }
 }

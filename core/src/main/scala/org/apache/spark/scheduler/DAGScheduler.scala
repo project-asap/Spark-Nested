@@ -188,24 +188,27 @@ class DAGScheduler(
   taskScheduler.setDAGScheduler(this)
 
   //nesting extra
-  private val id2RDD = new HashMap[ Int , RDD[_] ]
+  private val id2RDD = new HashMap[Int, RDD[Any] ]
 
   val taskDestination = new HashMap[Int,(Int, RpcEndpointRef)]
   //---
 
   //nesting extra---
-  def registerRDD( id:Int , rdd : RDD[_] ) = {
+  def registerRDD( id:Int , rdd : RDD[Any] ) = {
+    logInfo(s"--DEBUG register new RDD($id)")
     assert( id2RDD.getOrElse(id,null) == null )//
     id2RDD.synchronized{
       id2RDD += (id->rdd)
     }
   }
-  def lookupRDD( id:Int ) : RDD[_] = {
-    logInfo("--DAG successfull RDD lookup from id sent by worker ")
+  def lookupRDD( id:Int ) : RDD[Any] = {
+    logInfo(s"--DAG successfull RDD($id) lookup from id sent by worker ")
     id2RDD.synchronized{
       id2RDD(id)
     }
   }
+
+
   //---
 
 

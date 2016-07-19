@@ -115,7 +115,8 @@ class CoarseGrainedSchedulerBackend(scheduler: TaskSchedulerImpl, val rpcEnv: Rp
       }, 0, reviveIntervalMs, TimeUnit.MILLISECONDS)
     }
 
-    class SecondaryEndpoint(override val rpcEnv: RpcEnv) extends ThreadSafeRpcEndpoint with Logging {
+    class SecondaryEndpoint(override val rpcEnv: RpcEnv) extends ThreadSafeRpcEndpoint
+        with Logging {
       private val closureSerializer = SparkEnv.get.closureSerializer.newInstance()
 
       override protected def log = CoarseGrainedSchedulerBackend.this.log
@@ -124,11 +125,23 @@ class CoarseGrainedSchedulerBackend(scheduler: TaskSchedulerImpl, val rpcEnv: Rp
         case BatchRddOperators(executorId, rddid, ops, jobId, taskfunc) =>
           logInfo("--DEBUG called BatchCollect ops.length:" +ops.length)
           var rdd = scheduler.sc.dagScheduler.lookupRDD(rddid)
+          logInfo(s"--DEBUG init ID($rddid) RDD(${rdd.getClass()})")
           ops.foreach(op =>
             op match {
-              case(method,args) => rdd = RDD.call(rdd,method,args: _*).asInstanceOf[RDD[_]]
+              case(method,args) =>
+                method match {
+                  case "mapBlock" =>
+                    logInfo(s"--DEBUG replacing reflection")
+                    rdd = rdd.mapBlock[Any](args(0).asInstanceOf[Array[Any]=>Array[Any]])
+                  case _ =>
+                    rdd = RDD.call(rdd,method,args: _*).asInstanceOf[RDD[Any]]
+                }
             })
-          logInfo("--DEBUG foreach REFLECTION loop complete")
+
+          // val results = rdd.collect()
+          // results.foreach( r => logInfo(s"--DEBUG RESULTS $r"))
+
+          logInfo(s"--DEBUG REFLECTION loop complete ${rdd.getClass()}")
           executorDataMap.get(executorId) match {
             case Some(executorInfo) =>
               logInfo(s"--DEBUG BatchOps from EID($executorId) HOST(${executorInfo.executorHost}) JOB($jobId)")
