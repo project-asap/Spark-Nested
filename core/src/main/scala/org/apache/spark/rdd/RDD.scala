@@ -711,6 +711,12 @@ abstract class RDD[T: ClassTag](
       preservesPartitioning)
   }
 
+  def mapBlock[U: ClassTag](
+    f: Array[T] => Array[U], preservesPartitioning: Boolean = false): RDD[U] = {
+    val func = (context: TaskContext, index: Int, iter: Array[T]) => f(iter)
+       new MapBlockRDD(this, sc.clean(func), preservesPartitioning)
+  }
+
   /**
    * [performance] Spark's internal mapPartitions method which skips closure cleaning. It is a
    * performance API to be used carefully only if we are sure that the RDD elements are
