@@ -167,15 +167,15 @@ private[spark] class CoarseGrainedExecutorBackend(
 
       nestedTaskMap += (taskDesc.taskId -> (index, sendAddr))
 
-      if( availableCores.get() > 0 ){ //avoid running tasks concurrently
-          availableCores.getAndDecrement()
-          logInfo("Got assigned task " + taskDesc.taskId )
+      // if( availableCores.get() > 0 ){ //avoid running tasks concurrently
+      //     availableCores.getAndDecrement()
+      //     logInfo("Got assigned task " + taskDesc.taskId )
 
-        executor.launchTask(this, taskDesc.taskId, attemptNumber = taskDesc.attemptNumber,
-          taskDesc.name, taskDesc.serializedTask)
-      } else {
-        taskQueue.add(taskDesc) //enqueue for later use
-      }
+      executor.launchTask(this, taskDesc.taskId, attemptNumber = taskDesc.attemptNumber,
+        taskDesc.name, taskDesc.serializedTask)
+      // } else {
+      //   taskQueue.add(taskDesc) //enqueue for later use
+      // }
 
       // logInfo( s"--DEBUG  EID($executorId) launched NESTED task $sendAddr")
 
@@ -206,13 +206,6 @@ private[spark] class CoarseGrainedExecutorBackend(
 
       safeMsg(msg)
 
-    // case AppendRddOperator(rddid,op,args) =>
-    //   logInfo(s"--DEBUG RDD $rddid pushes operator, list size(${rddOpMap.get(rddid).size})")
-    //   rddOpMap.get(rddid) match {
-    //     case Some(list) => rddOpMap.update(rddid,list:+(op,args))
-    //     case None => rddOpMap.update(rddid,Seq((op,args)))
-    //   }
-
     case StatusUpdateExtended(eid,collectID,state,outId,data) =>
       assert( state == TaskState.FINISHED )
       //katsogr TODO handle IndirectTaskResult .....
@@ -233,11 +226,11 @@ private[spark] class CoarseGrainedExecutorBackend(
         }
 
         logInfo(s"--DEBUG STATUSUPDATEXTENDED THIS($executorId) EID($eid) INDEX($index) OID($outId)")
-        logInfo(s"--DEBUG runJobMap size(${runJobMap.size})")
 
         val (n,f) = runJobMap(index) //TODO getOrElse( throw new Execption() )
         assert(n>0)
 
+        logInfo(s"--DEBUG runJobMap size(${n})")
 
         f(n,outId,result.value)
         runJobMap.update(index,(n-1,f)) //append the data decrease the counter

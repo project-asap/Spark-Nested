@@ -360,6 +360,7 @@ class CoarseGrainedSchedulerBackend(scheduler: TaskSchedulerImpl, val rpcEnv: Rp
         }
         else {
           val executorData = executorDataMap(task.executorId)
+          //tentative stuff
           executorData.freeCores -= scheduler.CPUS_PER_TASK
 
           //nesting hacks
