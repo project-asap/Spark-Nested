@@ -23,6 +23,8 @@ import org.apache.spark.TaskState.TaskState
 import org.apache.spark.rpc.RpcEndpointRef
 import org.apache.spark.scheduler.ExecutorLossReason
 import org.apache.spark.util.{SerializableBuffer, Utils}
+import org.apache.spark.scheduler.TaskSet
+import org.apache.spark.scheduler.TaskDescription
 
 private[spark] sealed trait CoarseGrainedClusterMessage extends Serializable
 
@@ -31,7 +33,21 @@ private[spark] object CoarseGrainedClusterMessages {
   case object RetrieveSparkProps extends CoarseGrainedClusterMessage
 
   // Driver to executors
-  case class LaunchTask(data: SerializableBuffer) extends CoarseGrainedClusterMessage
+  // case class LaunchTask(data: SerializableBuffer) extends CoarseGrainedClusterMessage
+  // case class LaunchTask(reply:RpcEndpointRef, data: SerializableBuffer)
+      // extends CoarseGrainedClusterMessage
+
+//distributed schedulin extra messages
+  case class LaunchTask(data: SerializableBuffer)
+      extends CoarseGrainedClusterMessage
+  // case class AddExecutor(scheduler: RpcEndpointRef) extends CoarseGrainedClusterMessage
+  case class UpdateExecData(eid:String, data:ExecutorData) extends CoarseGrainedClusterMessage
+  case class ProxyLaunchTasks(taskset: TaskSet,indexes: Array[Long]) extends CoarseGrainedClusterMessage
+//
+  case class ProxyLaunchNestedTasks(
+    taskset: TaskSet,
+    indexes: Array[Long],
+    dest: (Int,RpcEndpointRef)) extends CoarseGrainedClusterMessage
 
   case class LaunchNestedTask(data: SerializableBuffer, addr: RpcEndpointRef, index: Int) extends CoarseGrainedClusterMessage
 
@@ -41,7 +57,7 @@ private[spark] object CoarseGrainedClusterMessages {
 
   sealed trait RegisterExecutorResponse
 
-  case class RegisteredExecutor(hostname: String) extends CoarseGrainedClusterMessage
+  case class RegisteredExecutor(hostname: String,scheduler: RpcEndpointRef) extends CoarseGrainedClusterMessage
     with RegisterExecutorResponse
 
   case class RegisterExecutorFailed(message: String) extends CoarseGrainedClusterMessage

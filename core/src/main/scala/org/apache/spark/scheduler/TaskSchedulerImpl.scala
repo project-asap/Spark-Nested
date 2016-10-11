@@ -36,6 +36,10 @@ import org.apache.spark.util.{ThreadUtils, Utils}
 import org.apache.spark.executor.TaskMetrics
 import org.apache.spark.storage.BlockManagerId
 
+import org.apache.spark.scheduler.cluster.CoarseGrainedSchedulerBackend
+import org.apache.spark.util.{Clock, SystemClock, Utils}
+
+
 /**
  * Schedules tasks for multiple types of clusters by acting through a SchedulerBackend.
  * It can also work with a local setup by using a LocalBackend and setting isLocal to true.
@@ -78,6 +82,11 @@ private[spark] class TaskSchedulerImpl(
   private val taskSetsByStageIdAndAttempt = new HashMap[Int, HashMap[Int, TaskSetManager]]
 
   private[scheduler] val taskIdToTaskSetManager = new HashMap[Long, TaskSetManager]
+
+  //distS
+  // val taskIdToTaskSetId = new HashMap[Long,String]
+    //distScheduling
+
   val taskIdToExecutorId = new HashMap[Long, String]
 
   @volatile private var hasReceivedTask = false
@@ -191,6 +200,65 @@ private[spark] class TaskSchedulerImpl(
       hasReceivedTask = true
     }
     backend.reviveOffers()
+  }
+
+  //distScheduling submit
+  def submitTasksDist(taskSet: TaskSet) = {
+    val tasks = taskSet.tasks
+
+    val clock = new SystemClock()
+    val n = tasks.length
+    val indexes = Array.tabulate(n)(i=>newTaskId())
+    // logInfo(s"<<< DS generated NEW taskIds ${indexes.mkString(",")}")
+    val infos = Array.tabulate(n)( i=>
+      new TaskInfo(indexes(i),i,attemptNumber=1,clock.getTimeMillis(),null,null,TaskLocality.ANY,false)
+    )
+
+
+    logInfo("Adding task set " + taskSet.id + " with " + tasks.length + " tasks")
+    this.synchronized {
+      val manager = createTaskSetManager(taskSet, maxTaskFailures)
+      val stage = taskSet.stageId
+      val stageTaskSets =
+        taskSetsByStageIdAndAttempt.getOrElseUpdate(stage, new HashMap[Int, TaskSetManager])
+      stageTaskSets(taskSet.stageAttemptId) = manager
+      // val conflictingTaskSet = stageTaskSets.exists { case (_, ts) =>
+      //   ts.taskSet != taskSet && !ts.isZombie
+      // }
+      // if (conflictingTaskSet) {
+      //   throw new IllegalStateException(s"more than one active taskSet for stage $stage:" +
+      //     s" ${stageTaskSets.toSeq.map{_._2.taskSet.id}.mkString(",")}")
+      // }
+      schedulableBuilder.addTaskSetManager(manager, manager.taskSet.properties)
+
+      //distScheduling
+      indexes.foreach( ind => taskIdToTaskSetManager(ind)=manager)
+      infos.map(in=>(in.taskId,in)).foreach{
+        case(i,info) =>
+          logInfo(s"<<< EXP adding KEY($i) info to TASKSETID(${taskSet.id})")
+          manager.taskInfos += (i->info)
+      }
+      //
+
+      if (!isLocal && !hasReceivedTask) {
+        starvationTimer.scheduleAtFixedRate(new TimerTask() {
+          override def run() {
+            if (!hasLaunchedTask) {
+              logWarning("Initial job has not accepted any resources; " +
+                "check your cluster UI to ensure that workers are registered " +
+                "and have sufficient resources")
+            } else {
+              this.cancel()
+            }
+          }
+        }, STARVATION_TIMEOUT_MS, STARVATION_TIMEOUT_MS)
+      }
+      hasReceivedTask = true
+    }
+    // backend.reviveOffers()
+
+    backend.asInstanceOf[CoarseGrainedSchedulerBackend].launchTasksDist(taskSet,indexes)
+
   }
 
   // Label as private[scheduler] to allow tests to swap in different task set managers if necessary
@@ -343,6 +411,9 @@ private[spark] class TaskSchedulerImpl(
           case Some(taskSet) =>
             if (TaskState.isFinished(state)) {
               taskIdToTaskSetManager.remove(tid)
+              //distScheduling
+              // taskIdToTaskSetId.remove(tid)
+              //distScheduling
               taskIdToExecutorId.remove(tid).foreach { execId =>
                 if (executorIdToTaskCount.contains(execId)) {
                   executorIdToTaskCount(execId) -= 1

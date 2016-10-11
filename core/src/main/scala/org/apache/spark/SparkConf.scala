@@ -369,6 +369,19 @@ class SparkConf(loadDefaults: Boolean) extends Cloneable with Logging {
     new SparkConf(false).setAll(getAll)
   }
 
+  //distributed scheduling extra argument
+  // set("spark.dscheduling","false")
+  def enableDistSchedulng(nschedulers:Int) = {
+    set("spark.dscheduling",s"$nschedulers")
+  }
+
+  def getDistScheduling() = {
+    getOption("spark.dscheduling") match {
+      case Some(n) => true
+      case None => false
+    }
+  }
+
   /**
    * By using this instead of System.getenv(), environment variables can be mocked
    * in unit tests.

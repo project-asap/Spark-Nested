@@ -859,6 +859,12 @@ abstract class RDD[T: ClassTag](
     }
   }
 
+  // def mapBlock[U: ClassTag](
+  //   f: Array[T] => Array[U], preservesPartitioning: Boolean = false): RDD[U] = {
+  //   val func = (context: TaskContext, index: Int, iter: Array[T]) => f(iter)
+  //      new MapBlockRDD(this, sc.clean(func), preservesPartitioning)
+  // }
+
   /**
    * [performance] Spark's internal mapPartitions method which skips closure cleaning. It is a
    * performance API to be used carefully only if we are sure that the RDD elements are
@@ -1938,6 +1944,17 @@ abstract class RDD[T: ClassTag](
 
   def toJavaRDD() : JavaRDD[T] = {
     new JavaRDD(this)(elementClassTag)
+  }
+
+  import org.apache.spark.rdd.HierRDD._
+  def hierarchical[S:ClassTag,A:ClassTag]
+    (part:(T,S)=>Int,adv:(Int,S)=>S,agg:Seq[T]=>A,s:S,maxp:Int) =
+    new HierRDD(this,part,adv,agg,maxp,0,s)
+
+  def hierarchical2[A:ClassTag](
+    s:Splittable[T],
+    coal:Boolean=false) = {
+    new HierRDDv2(this,s,coal)
   }
 }
 

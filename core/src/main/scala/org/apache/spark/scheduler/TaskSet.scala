@@ -31,5 +31,9 @@ private[spark] class TaskSet(
     val properties: Properties) {
   val id: String = stageId + "." + stageAttemptId
 
+  def slice(n:Int): Array[TaskSet] = {
+    tasks.grouped(n).map( taskslice => new TaskSet(taskslice,stageId,stageAttemptId,priority,properties) ).toArray
+  }
+
   override def toString: String = "TaskSet " + id
 }

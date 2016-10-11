@@ -28,6 +28,7 @@ import org.apache.spark.scheduler._
 import org.apache.spark.scheduler.cluster.CoarseGrainedClusterMessages._
 import org.apache.spark.scheduler.cluster.CoarseGrainedSchedulerBackend.ENDPOINT_NAME
 import org.apache.spark.util.{ThreadUtils, SerializableBuffer, AkkaUtils, Utils}
+import scala.util.Random
 
 import org.apache.spark.rdd._
 import scala.concurrent.ExecutionContext
@@ -83,6 +84,16 @@ class CoarseGrainedSchedulerBackend(scheduler: TaskSchedulerImpl, val rpcEnv: Rp
 
   // Executors that have been lost, but for which we don't yet know the real exit reason.
   protected val executorsPendingLossReason = new HashSet[String]
+
+  val NSCHEDULERS = scheduler.sc.conf.getOption("spark.dscheduling") match {
+    case Some(string) => string.toInt
+    case None => 0
+  }
+
+  private val r = new Random()
+  val dschedulingEnabled = if(NSCHEDULERS >0) true else false
+
+  var dSchedulers: Array[RpcEndpointRef] = null
 
   class DriverEndpoint(override val rpcEnv: RpcEnv, sparkProperties: Seq[(String, String)])
     extends ThreadSafeRpcEndpoint with Logging {
@@ -161,7 +172,9 @@ class CoarseGrainedSchedulerBackend(scheduler: TaskSchedulerImpl, val rpcEnv: Rp
           executorDataMap.get(executorId) match {
             case Some(executorInfo) =>
               executorInfo.freeCores += scheduler.CPUS_PER_TASK
-              makeOffers(executorId)
+              if(dschedulingEnabled==false){
+                makeOffers(executorId)
+              }
             case None =>
               // Ignoring the update since we don't know about the executor.
               logWarning(s"Ignored task status update ($taskId state $state) " +
@@ -170,7 +183,7 @@ class CoarseGrainedSchedulerBackend(scheduler: TaskSchedulerImpl, val rpcEnv: Rp
         }
 
       case ReviveOffers =>
-        makeOffers()
+        if(dschedulingEnabled==false) makeOffers()
 
       case KillTask(taskId, executorId, interruptThread) =>
         executorDataMap.get(executorId) match {
@@ -257,10 +270,21 @@ class CoarseGrainedSchedulerBackend(scheduler: TaskSchedulerImpl, val rpcEnv: Rp
             }
           }
           // Note: some tests expect the reply to come after we put the executor in the map
-          context.reply(RegisteredExecutor(executorAddress.host))
+          dSchedulers.foreach( scheduler => scheduler.send( UpdateExecData(executorId,data)))
+
+          val assignedScheduler = if(dschedulingEnabled) {
+            val sid = r.nextInt(NSCHEDULERS) //assign the worker to a random scheduler
+            logInfo(s"Assigned scheduler $sid to executor $executorId")
+            dSchedulers(sid)
+          } else {
+            null
+          }
+          context.reply(RegisteredExecutor(executorAddress.host,assignedScheduler))
           listenerBus.post(
             SparkListenerExecutorAdded(System.currentTimeMillis(), executorId, data))
-          makeOffers()
+          if(dschedulingEnabled==false){
+            makeOffers()
+          }
         }
 
       case StopDriver =>
@@ -360,6 +384,12 @@ class CoarseGrainedSchedulerBackend(scheduler: TaskSchedulerImpl, val rpcEnv: Rp
         }
       }
     }
+    // executorData.executorEndpoint.send(LaunchTask(this.self,new SerializableBuffer(serializedTask)))
+  // }
+
+    // }
+
+
     // Remove a disconnected slave from the cluster
     def removeExecutor(executorId: String, reason: ExecutorLossReason): Unit = {
       executorDataMap.get(executorId) match {
@@ -412,6 +442,26 @@ class CoarseGrainedSchedulerBackend(scheduler: TaskSchedulerImpl, val rpcEnv: Rp
     }
   }
 
+  //distScheduling
+  def launchTasksDist(taskset:TaskSet,indexes: Array[Long]) = {
+    //slice the taskset into many sub tasksets to increase parallelism
+    val jobId = taskset.tasks(0).jobId
+    indexes.grouped(NSCHEDULERS).toArray.zip(taskset.slice(NSCHEDULERS)).par.foreach(
+      pair => {
+        val subtasks   = pair._2
+        val subindices = pair._1
+        val sid        = r.nextInt(NSCHEDULERS)
+        logInfo(s"<<< DISTD sending taskset to SCHEDULER $sid")
+        scheduler.sc.dagScheduler.taskDestination.get(jobId) match {
+          case None => //normal task
+            dSchedulers(sid).send(ProxyLaunchTasks(subtasks,subindices))
+          case Some((outid,addr)) =>
+            dSchedulers(sid).send(ProxyLaunchNestedTasks(subtasks,subindices,(outid,addr)))
+        }
+      })
+  }
+
+
   var driverEndpoint: RpcEndpointRef = null
   val taskIdsOnSlave = new HashMap[String, HashSet[String]]
 
@@ -425,6 +475,12 @@ class CoarseGrainedSchedulerBackend(scheduler: TaskSchedulerImpl, val rpcEnv: Rp
 
     // TODO (prashant) send conf instead of properties
     driverEndpoint = rpcEnv.setupEndpoint(ENDPOINT_NAME, createDriverEndpoint(properties))
+
+    dSchedulers = Array.tabulate(NSCHEDULERS)( i =>
+      rpcEnv.setupEndpoint(s"SecondaryScheduler$i",
+        new SecondLevelScheduler(
+          i,rpcEnv,driverEndpoint,executorDataMap.clone,scheduler.sc.addedFiles,scheduler.sc.addedJars))
+    )
   }
 
   protected def createDriverEndpoint(properties: Seq[(String, String)]): DriverEndpoint = {

@@ -51,6 +51,19 @@ private[spark] abstract class Task[T](
     val partitionId: Int,
     val jobId: Int = 0,
     internalAccumulators: Seq[Accumulator[Long]]) extends Serializable {
+// =======
+//   val stageId: Int,
+//   val stageAttemptId: Int,
+//   var partitionId: Int,
+//   val jobId: Int = 0,
+//   internalAccumulators: Seq[Accumulator[Long]]) extends Serializable {
+
+// // private[spark] abstract class Task[T](
+// //     val stageId: Int,
+// //     val stageAttemptId: Int,
+// //     val partitionId: Int,
+// //     internalAccumulators: Seq[Accumulator[Long]]) extends Serializable {
+// >>>>>>> distScheduling
 
   /**
    * The key of the Map is the accumulator id and the value of the Map is the latest accumulator

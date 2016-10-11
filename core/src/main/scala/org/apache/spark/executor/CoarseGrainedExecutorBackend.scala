@@ -34,6 +34,9 @@ import org.apache.spark.scheduler.TaskDescription
 import org.apache.spark.scheduler.cluster.CoarseGrainedClusterMessages._
 import org.apache.spark.serializer.SerializerInstance
 import org.apache.spark.util.{ThreadUtils, SignalLogger, Utils}
+import scala.collection.mutable.{HashMap}
+import java.util.concurrent.atomic.AtomicInteger
+import java.util.concurrent._
 
 //extra imports
 import org.apache.spark.scheduler.cluster.CoarseGrainedClusterMessage
@@ -92,6 +95,14 @@ private[spark] class CoarseGrainedExecutorBackend(
   // to be changed so that we don't share the serializer instance across threads
   private[this] val ser: SerializerInstance = env.closureSerializer.newInstance()
 
+  var driver2Level : Option[RpcEndpointRef] = None
+  val taskIdtoScheduler = new HashMap[Long,RpcEndpointRef]
+
+  var availableCores : AtomicInteger = new AtomicInteger(cores)
+
+  val taskQueue = new ConcurrentLinkedQueue[TaskDescription]()
+    // scala.collection.mutable.ListBuffer.empty[TaskDescription]
+
   override def onStart() {
     logInfo("Connecting to driver: " + driverUrl)
     rpcEnv.asyncSetupEndpointRefByURI(driverUrl).flatMap { ref =>
@@ -118,10 +129,14 @@ private[spark] class CoarseGrainedExecutorBackend(
   }
 
   override def receive: PartialFunction[Any, Unit] = {
-    case RegisteredExecutor(hostname) =>
-      logInfo("Successfully registered with driver")
+    case RegisteredExecutor(hostname,dscheduler) =>
+      logInfo(s"Successfully registered with driver $dscheduler")
       executor = new Executor(executorId, hostname, env, userClassPath, isLocal = false)
-
+      driver2Level = if(dscheduler != null ){
+        Some(dscheduler)
+      } else {
+        driver
+      }
     case RegisterExecutorFailed(message) =>
       logError("Slave registration failed: " + message)
       System.exit(1)
@@ -132,9 +147,16 @@ private[spark] class CoarseGrainedExecutorBackend(
         System.exit(1)
       } else {
         val taskDesc = ser.deserialize[TaskDescription](data.value)
-        logInfo("Got assigned task " + taskDesc.taskId)
-        executor.launchTask(this, taskId = taskDesc.taskId, attemptNumber = taskDesc.attemptNumber,
-          taskDesc.name, taskDesc.serializedTask)
+        // taskIdtoScheduler(taskDesc.taskId) = reply //maybe remove that
+        // logInfo(s"<<< LaunchTasks msg DISTD Cores == $availableCores")
+        if( availableCores.get() > 0 ){ //avoid running tasks concurrently
+          availableCores.getAndDecrement()
+          logInfo("Got assigned task " + taskDesc.taskId )
+          executor.launchTask(this, taskId = taskDesc.taskId, attemptNumber = taskDesc.attemptNumber,
+            taskDesc.name, taskDesc.serializedTask)
+        } else {
+          taskQueue.add(taskDesc) //enqueue for later use
+        }
       }
 
     case LaunchNestedTask(data,sendAddr,index) =>
@@ -144,8 +166,17 @@ private[spark] class CoarseGrainedExecutorBackend(
       logInfo( s"--DEBUG EID($executorId) LAUNCHNESTED ${taskDesc.taskId} ${sendAddr} ")
 
       nestedTaskMap += (taskDesc.taskId -> (index, sendAddr))
-      executor.launchTask(this, taskDesc.taskId, attemptNumber = taskDesc.attemptNumber,
-        taskDesc.name, taskDesc.serializedTask)
+
+      if( availableCores.get() > 0 ){ //avoid running tasks concurrently
+          availableCores.getAndDecrement()
+          logInfo("Got assigned task " + taskDesc.taskId )
+
+        executor.launchTask(this, taskDesc.taskId, attemptNumber = taskDesc.attemptNumber,
+          taskDesc.name, taskDesc.serializedTask)
+      } else {
+        taskQueue.add(taskDesc) //enqueue for later use
+      }
+
       // logInfo( s"--DEBUG  EID($executorId) launched NESTED task $sendAddr")
 
     case KillTask(taskId, _, interruptThread) =>
@@ -244,7 +275,7 @@ private[spark] class CoarseGrainedExecutorBackend(
   }
 
   override def statusUpdate(taskId: Long, state: TaskState, data: ByteBuffer) {
-    logInfo( s"--DEBUG E EID($executorId) TID($taskId) $state")
+    logInfo(s"--DEBUG E EID($executorId) TID($taskId) $state")
     if(state == TaskState.FINISHED){
       nestedTaskMap.get(taskId.asInstanceOf[Int]) match {
         case Some((index,addr)) =>
@@ -260,6 +291,21 @@ private[spark] class CoarseGrainedExecutorBackend(
     }else{
       val msg = StatusUpdate(executorId, taskId, state, data)
       safeMsg(msg)
+    }
+
+    if(state==TaskState.FINISHED){
+      if(taskQueue.size()>0) {
+        val taskDesc = taskQueue.poll()
+        if(taskDesc != null){
+          logInfo("Running Task From the Queue " + taskDesc.taskId)
+          executor.launchTask(this, taskId = taskDesc.taskId, attemptNumber = taskDesc.attemptNumber,
+            taskDesc.name, taskDesc.serializedTask)
+        } else {
+          availableCores.getAndIncrement()
+        }
+      } else {
+        availableCores.getAndIncrement()
+      }
     }
   }
 
@@ -278,10 +324,30 @@ private[spark] class CoarseGrainedExecutorBackend(
           safeMsg(msg)
       }
     } else {
+//       val msg = StatusUpdate(executorId, taskId, state, data)
+//       driver match {
+//         case Some(driverRef) => driverRef.send(msg)
+//         case None => logWarning(s"Drop $msg because has not yet connected to driver")
+//       }
       val msg = StatusUpdate(executorId, taskId, state, data)
-      driver match {
+      driver2Level match {
         case Some(driverRef) => driverRef.send(msg)
         case None => logWarning(s"Drop $msg because has not yet connected to driver")
+      }
+    }
+    //katsogr extra
+    if(state==TaskState.FINISHED){
+      if(taskQueue.size()>0) {
+        val taskDesc = taskQueue.poll()
+        if(taskDesc != null){
+          logInfo("Running Task From the Queue " + taskDesc.taskId)
+          executor.launchTask(this, taskId = taskDesc.taskId, attemptNumber = taskDesc.attemptNumber,
+            taskDesc.name, taskDesc.serializedTask)
+        } else {
+          availableCores.getAndIncrement()
+        }
+      } else {
+        availableCores.getAndIncrement()
       }
     }
   }
