@@ -400,7 +400,7 @@ abstract class RDD[T: ClassTag](
   /**
    * Return a new RDD containing only the elements that satisfy a predicate.
     */
-  def filter(f: T => Boolean): RDD[T] = withScope {
+  def filter(f: T => Boolean): RDD[T] = {
     // def filter(f: T => Boolean): RDD[T] = withscope {
     if( sc == null){ //running outside the master context
       implicit val timeout = Timeout(100.millis) //TODO fix timeout val
